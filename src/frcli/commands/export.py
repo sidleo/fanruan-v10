@@ -1,0 +1,204 @@
+"""frcli export 命令组 - 报表导出"""
+
+import json
+import click
+import yaml
+from pathlib import Path
+from ..config import load_config
+from ..client import FineReportClient
+from ..output import output_data, success, error
+from ..exceptions import ExportError
+
+
+def get_client(instance_name=None) -> FineReportClient:
+    """获取配置好的客户端"""
+    config = load_config(instance_name)
+    return FineReportClient(config)
+
+
+@click.group("export")
+def export_group():
+    """导出报表为各种格式"""
+    pass
+
+
+@export_group.command("pdf")
+@click.argument("report_path")
+@click.option("-o", "--output", help="输出文件路径")
+@click.option("--params", type=str, help='JSON 格式的报表参数，如 \'{"date":"2024-01-01"}\'')
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_pdf(report_path, output, params, instance):
+    """导出报表为 PDF"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.pdf"
+    params_dict = json.loads(params) if params else {}
+
+    try:
+        client = get_client(instance)
+        with client:
+            result = client.export_report(report_path, "pdf", output, params_dict)
+            success({
+                "action": "export",
+                "format": "pdf",
+                "report": report_path,
+                "file": result,
+            })
+    except Exception as e:
+        error(e)
+
+
+@export_group.command("excel")
+@click.argument("report_path")
+@click.option("-o", "--output", help="输出文件路径")
+@click.option("--params", type=str, help='JSON 格式的报表参数')
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_excel(report_path, output, params, instance):
+    """导出报表为 Excel"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.xlsx"
+    params_dict = json.loads(params) if params else {}
+
+    try:
+        client = get_client(instance)
+        with client:
+            result = client.export_report(report_path, "excel", output, params_dict)
+            success({
+                "action": "export",
+                "format": "excel",
+                "report": report_path,
+                "file": result,
+            })
+    except Exception as e:
+        error(e)
+
+
+@export_group.command("word")
+@click.argument("report_path")
+@click.option("-o", "--output", help="输出文件路径")
+@click.option("--params", type=str, help='JSON 格式的报表参数')
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_word(report_path, output, params, instance):
+    """导出报表为 Word"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.docx"
+    params_dict = json.loads(params) if params else {}
+
+    try:
+        client = get_client(instance)
+        with client:
+            result = client.export_report(report_path, "word", output, params_dict)
+            success({
+                "action": "export",
+                "format": "word",
+                "report": report_path,
+                "file": result,
+            })
+    except Exception as e:
+        error(e)
+
+
+@export_group.command("image")
+@click.argument("report_path")
+@click.option("-o", "--output", help="输出文件路径")
+@click.option("--params", type=str, help='JSON 格式的报表参数')
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_image(report_path, output, params, instance):
+    """导出报表为图片"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.png"
+    params_dict = json.loads(params) if params else {}
+
+    try:
+        client = get_client(instance)
+        with client:
+            result = client.export_report(report_path, "image", output, params_dict)
+            success({
+                "action": "export",
+                "format": "image",
+                "report": report_path,
+                "file": result,
+            })
+    except Exception as e:
+        error(e)
+
+
+@export_group.command("csv")
+@click.argument("report_path")
+@click.option("-o", "--output", help="输出文件路径")
+@click.option("--params", type=str, help='JSON 格式的报表参数')
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_csv(report_path, output, params, instance):
+    """导出报表为 CSV"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.csv"
+    params_dict = json.loads(params) if params else {}
+
+    try:
+        client = get_client(instance)
+        with client:
+            result = client.export_report(report_path, "csv", output, params_dict)
+            success({
+                "action": "export",
+                "format": "csv",
+                "report": report_path,
+                "file": result,
+            })
+    except Exception as e:
+        error(e)
+
+
+@export_group.command("batch")
+@click.argument("manifest_path", type=click.Path(exists=True))
+@click.option("-i", "--instance", help="FineReport 实例名")
+def export_batch(manifest_path, instance):
+    """批量导出（从 manifest.yaml 读取配置）
+
+    manifest 格式:
+    reports:
+      - path: //doc//report1.cpt
+        format: pdf
+        output: ./out/report1.pdf
+        params: {date: "2024-01-01"}
+    """
+    try:
+        with open(manifest_path, "r", encoding="utf-8") as f:
+            manifest = yaml.safe_load(f)
+    except Exception as e:
+        error(ExportError(f"读取 manifest 失败: {e}"))
+        return
+
+    reports = manifest.get("reports", [])
+    if not reports:
+        error(ExportError("manifest 中未定义任何报表"))
+        return
+
+    results = []
+    errors_list = []
+
+    client = get_client(instance)
+    with client:
+        for i, item in enumerate(reports):
+            report_path = item.get("path")
+            format = item.get("format", "pdf")
+            output = item.get("output", f"export_{i}.{format}")
+            params = item.get("params", {})
+
+            try:
+                result = client.export_report(report_path, format, output, params)
+                results.append({
+                    "report": report_path,
+                    "format": format,
+                    "file": result,
+                    "status": "ok",
+                })
+            except Exception as e:
+                errors_list.append({
+                    "report": report_path,
+                    "format": format,
+                    "status": "error",
+                    "error": str(e),
+                })
+
+    success({
+        "action": "batch_export",
+        "total": len(reports),
+        "success": len(results),
+        "failed": len(errors_list),
+        "results": results,
+        "errors": errors_list,
+    })

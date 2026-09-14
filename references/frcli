@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""frcli 软链 shim —— 供 PATH 中 `frcli` 软链指向。
+
+用途:
+  references/run.py 在首次自举成功后, 会在 PATH 可写目录建立
+  `frcli -> references/frcli` 软链。此后直接敲 `frcli` 即命中本 shim,
+  以 `python -m frcli` 方式运行 skill 内置源码, 不再 command not found。
+
+设计要点:
+  - 独立于 run.py: 本 shim 不做 PATH 探测/建链, 无递归风险。
+  - 不依赖安装位置: 通过 __file__ 定位 skill 源码目录, 随 skill 移动而生效。
+  - 跨平台: 纯 Python, Windows 可改用 .cmd 包装指向 run.py。
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+# 本文件位于 <skill base>/references/frcli
+SKILL_BASE = Path(__file__).resolve().parent.parent
+SRC_DIR = SKILL_BASE / "src"
+DEPS = ("click", "httpx", "yaml", "rich")
+
+_PY_CANDIDATES = [
+    sys.executable,
+    "python3",
+    "python",
+    "/Library/Frameworks/Python.framework/Versions/Current/bin/python3",
+    "/usr/local/bin/python3",
+    "/opt/homebrew/bin/python3",
+    "/usr/bin/python3",
+    "py",  # Windows: Python Launcher
+]
+
+
+def _has_deps(python: str) -> bool:
+    code = (
+        "import importlib.util; "
+        f"raise SystemExit(0 if all(importlib.util.find_spec(m) for m in {DEPS!r}) else 1)"
+    )
+    try:
+        return (
+            subprocess.call(
+                [python, "-c", code],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            == 0
+        )
+    except OSError:
+        return False
+
+
+def _find_python_with_deps() -> str | None:
+    seen: set[str] = set()
+    for cand in _PY_CANDIDATES:
+        resolved = shutil.which(cand) or cand
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        if _has_deps(resolved):
+            return resolved
+    return None
+
+
+def main() -> int:
+    cli = SRC_DIR / "frcli" / "cli.py"
+    if not cli.is_file():
+        print(f"frcli 源码缺失: 未找到 {cli}", file=sys.stderr)
+        return 127
+    python = _find_python_with_deps()
+    if not python:
+        print(
+            "frcli 不可用: 未找到带依赖(click/httpx/pyyaml/rich)的 Python。\n"
+            "请按 references/install.md 自举安装。",
+            file=sys.stderr,
+        )
+        return 127
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(SRC_DIR) + os.pathsep + env.get("PYTHONPATH", "")
+    return subprocess.call(
+        [python, "-m", "frcli", *sys.argv[1:]],
+        env=env,
+        cwd=str(SRC_DIR),
+    )
+
+
+if __name__ == "__main__":
+    sys.exit(main())
