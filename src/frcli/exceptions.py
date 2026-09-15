@@ -40,3 +40,8 @@ class ScheduleError(FrcliError):
 class ConnectionError(FrcliError):
     """连接失败"""
     code = "CONNECTION_ERROR"
+
+
+class ApiError(FrcliError):
+    """决策平台接口返回错误（200 + HTML 出错页，原因在 detail-message）"""
+    code = "API_ERROR"

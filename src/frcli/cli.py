@@ -6,6 +6,10 @@ from .commands.server import server_group
 from .commands.export import export_group
 from .commands.schedule import schedule_group
 from .commands.report import report_group
+from .commands.attach import attach_group
+from .commands.system import system_group
+from .commands.entry import entry_group
+from .commands.user import user_group
 
 
 @click.group()
@@ -34,6 +38,10 @@ main.add_command(server_group)
 main.add_command(export_group)
 main.add_command(schedule_group)
 main.add_command(report_group)
+main.add_command(attach_group)
+main.add_command(system_group)
+main.add_command(entry_group)
+main.add_command(user_group)
 
 
 if __name__ == "__main__":

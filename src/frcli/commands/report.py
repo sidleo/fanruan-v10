@@ -20,15 +20,60 @@ def report_group():
 
 @report_group.command("list")
 @click.argument("directory", default="/")
+@click.option("--keyword", help="服务端按名称/路径过滤（比拉全量再本地筛省事）")
+@click.option("--type", "file_type", help="服务端按类型过滤，如 cpt / frm")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
-def list_reports(directory, fmt, instance):
+def list_reports(directory, keyword, file_type, fmt, instance):
     """列出指定目录下的报表文件"""
     try:
         client = get_client(instance)
         with client:
-            data = client.list_reports(directory)
+            data = client.list_reports(directory, keyword=keyword, file_types=file_type)
             output_data(data, format=fmt, title=f"报表文件: {directory}")
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("serverdatasets")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def serverdatasets_cmd(fmt, instance):
+    """列出服务器数据集（平台级数据集，非模板内数据集）"""
+    try:
+        client = get_client(instance)
+        with client:
+            output_data(client.list_server_datasets(), format=fmt, title="服务器数据集")
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("columns")
+@click.argument("dataset_name")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def columns_cmd(dataset_name, fmt, instance):
+    """查看服务器数据集的字段清单（列名/列类型）"""
+    try:
+        client = get_client(instance)
+        with client:
+            data = client.get_dataset_columns(dataset_name)
+            output_data(data, format=fmt, title=f"数据集字段: {dataset_name}")
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("authed")
+@click.option("--keyword", help="按关键词过滤")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def authed_cmd(keyword, fmt, instance):
+    """当前账号有权限的模板树"""
+    try:
+        client = get_client(instance)
+        with client:
+            output_data(client.get_authenticated_templates(keyword), format=fmt,
+                        title="有权限的模板")
     except Exception as e:
         error(e)
 
@@ -101,6 +146,21 @@ def download_report(remote_path, output, instance):
                 "remote": remote_path,
                 "local": result,
             })
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("paras")
+@click.argument("report_path")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def report_paras(report_path, fmt, instance):
+    """查看报表参数定义（官方接口，含派生参数公式）"""
+    try:
+        client = get_client(instance)
+        with client:
+            data = client.get_report_paras(report_path)
+            output_data(data, format=fmt, title=f"报表参数: {report_path}")
     except Exception as e:
         error(e)
 

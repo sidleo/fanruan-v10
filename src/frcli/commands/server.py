@@ -79,19 +79,18 @@ def set_default_cmd(name):
 @click.argument("name", required=False)
 @click.option("--format", "-f", "fmt", type=click.Choice(["json", "table"]), default="json")
 def test_cmd(name, fmt):
-    """测试连接并返回认证状态"""
+    """测试连接并返回认证状态（真实发请求，不只看本地缓存）"""
     try:
         config = load_config(name)
         client = FineReportClient(config)
         with client:
-            # 尝试认证
-            client._ensure_auth()
+            result = client.test_connection()
             success({
                 "action": "test_connection",
                 "instance": config.name,
                 "url": config.url,
                 "username": config.username,
-                "status": "connected",
+                **result,
             })
     except Exception as e:
         error(e)
