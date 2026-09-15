@@ -1,7 +1,7 @@
 ---
 name: fanruan-v10
-version: 0.4.0
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 server(多实例配置) / report(模板目录·下载·数据集SQL) / export(PDF·Excel·Word·图片·CSV·批量) / schedule(定时任务) 4 个命令组。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+version: 0.4.1
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
     bins: ["frcli"]
