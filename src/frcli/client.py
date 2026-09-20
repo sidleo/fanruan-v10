@@ -604,11 +604,18 @@ class FineReportClient:
         return True
 
     def delete_schedule(self, task_id: str) -> bool:
-        """删除定时任务"""
+        """删除定时任务
+
+        平台要的是**裸 JSON 数组** `["<id>"]`，不是 `{"ids": [...]}` —— 传对象会回
+        200 + HTML 出错页（`Cannot deserialize instance of [Ljava.lang.String; out of
+        START_OBJECT`）。旧实现只看 HTTP 状态码，把「没删掉」报成 `deleted: true`。
+        这里按平台真实语义发裸数组，并用 `_unwrap_json` 校验，避免假成功。
+        """
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/task/deletes"
-        resp = self._post(url, json={"ids": [task_id]})
-        return resp.status_code == 200
+        resp = self._post(url, json=[task_id])
+        payload = _unwrap_json(resp, "删除定时任务")
+        return str((payload or {}).get("data", "")).lower() == "success"
 
     def execute_schedule(self, task_id: str) -> dict:
         """立即执行定时任务"""

@@ -235,6 +235,50 @@ def test_remove_attach_sends_delete():
     assert seen["path"].endswith("/decision/v10/attach/remove/abc_123")
 
 
+def test_delete_schedule_posts_bare_id_array():
+    """平台要裸数组 `["<id>"]`；传 {"ids": [...]} 会被拒且旧实现误报成功"""
+    seen = {}
+
+    def handler(request):
+        seen["method"] = request.method
+        seen["path"] = request.url.path
+        seen["body"] = request.content.decode()
+        return httpx.Response(200, json={"data": "success"})
+
+    client = _mock_client(handler)
+    try:
+        assert client.delete_schedule("abcd-1234") is True
+    finally:
+        client.close()
+
+    assert seen["method"] == "POST"
+    assert seen["path"].endswith("/decision/v10/schedule/task/deletes")
+    assert seen["body"] == '["abcd-1234"]'
+
+
+def test_delete_schedule_raises_on_platform_error_page():
+    """平台删除失败回 200 + HTML 出错页，必须抛错而不是返回 True"""
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html;charset=UTF-8"},
+            text=_HTML_ERR.format(
+                "Could not read JSON: Cannot deserialize instance of "
+                "`[Ljava.lang.String;` out of START_OBJECT token"
+            ),
+        )
+
+    client = _mock_client(handler)
+    try:
+        with pytest.raises(ApiError) as exc:
+            client.delete_schedule("abcd-1234")
+    finally:
+        client.close()
+
+    assert "START_OBJECT" in str(exc.value)
+
+
 # ---- 0.4.0 新增只读接口：逐一断言 URL 与方法（handler 只记录，不校验返回结构） ----
 
 NEW_ENDPOINTS = [

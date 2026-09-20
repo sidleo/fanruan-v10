@@ -64,8 +64,8 @@ fanruan_v10/
 | 定时任务列表 | `/decision/v10/schedule/task/names` | GET |
 | 定时任务全量（带 taskId） | `/decision/v10/schedule/task/listAll/2` | GET |
 | 定时任务搜索 | `/decision/v10/schedule/task/search` | POST `{taskName}` |
-| 创建 / 更新任务 | `/decision/v10/schedule/task` | POST / PUT（PUT 体必须含 `id`） |
-| 删除任务 | `/decision/v10/schedule/task/deletes` | POST `{ids: [...]}` |
+| 创建 / 更新任务 | `/decision/v10/schedule/task` | POST / PUT（PUT 体必须含 `id`；POST 带 `creator` 才写创建人） |
+| 删除任务 | `/decision/v10/schedule/task/deletes` | POST **裸数组** `["<id>"]`（传 `{ids:[...]}` 会被拒） |
 | 立即执行 | `/decision/v10/schedule/task/{id}/once` | POST |
 | 执行历史（只有 id） | `/decision/v10/schedule/task/log/info` | POST `{taskName}` |
 | 执行记录 + 结果 | `/decision/v10/schedule/record/search` | POST `{taskName,page,perPage}` |
@@ -123,6 +123,28 @@ fanruan_v10/
 （`Unrecognized field "count" (8 known properties: "taskName",...,"perPage","page")` —— `schedule record` 就是这么试通的）。
 `detail-message` 为空时只剩 `simple-message = Fine-Dec_Default_Error_Tip` → 多为对象不存在（logId 过期/被清理）。
 `client._unwrap_json()` 已把它翻成 `API_ERROR` + 平台原文，新接口一律走它，别再 `resp.json()` 裸解析。
+
+### 写接口的返回值必须校验，不能只看 HTTP 200
+
+`schedule delete` 老实现发 `{"ids":[...]}`（平台要**裸数组** `["<id>"]`）→ 平台回 200 + HTML 出错页
+（`Cannot deserialize instance of [Ljava.lang.String; out of START_OBJECT`），而 `return resp.status_code == 200`
+照样报 `deleted: true / status: ok`，任务其实还在（2026-09 实测复现）。**规律**：本平台出错一律 200，
+所以写操作要么解析 `data == "success"`，要么走 `_unwrap_json()` 让它抛错。
+
+### `schedule create` 必须重置输出 id，否则 detached entity
+
+从 `schedule get` 派生 YAML 建任务时，若沿用源任务的 `scheduleOutput.id` / `outputActionList[].id`，
+服务端报 `detached entity passed to persist: com.fr.schedule.base.entity.ScheduleOutputEntity`（200 + HTML 出错页）。
+换成新 UUID 即可；`creator` 只在创建时能写入（PUT 改不掉）。
+
+### 自定义类输出的日志节点是异步写的
+
+`自定义类附件处理`（FeishuPushPlus10V2 等）在任务跑完约 5 分钟后才写进日志节点树；
+当场只看到 `模板计算/导出cpr/导出pdf` 属正常，别据此判定任务配置没生效。
+
+### `schedule history` 是升序（`-n 1` = 最早一条）
+
+要最新记录用 `schedule record`（倒序）或放大 `-n` 后取最后一条。
 
 ### 默认 30s 超时，复杂报表必然超时
 

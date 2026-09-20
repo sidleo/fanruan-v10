@@ -53,9 +53,15 @@ FRCLI_TIMEOUT=600 frcli export batch manifest.yaml
 # 7. 定时任务（读）
 frcli schedule list -f table
 frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID id
-frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 返回 id 即 logId
+frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id 即 logId
 frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录 + 结果（分页，带 total）
 frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树，定位哪一步失败
+
+# 7.1 定时任务（写，🔴 先确认）：create / update / delete <UUID> / run <任务名>
+#   新建任务：用 schedule get 派生 YAML（去掉只读字段 + 换 taskName/baseName + 重置 scheduleOutput.id
+#   与 outputActionList 的 id/outputId，建议带上 creator），再 frcli schedule create new.yaml
+#   —— 细节与「detached entity」坑见 SKILL.md §6.11
+#   delete 的参数是 UUID（不是任务名）；body 为裸数组，0.4.2 起返回值会被校验
 
 # 8. 附件（服务器附件缓存，非报表目录）
 frcli attach upload /tmp/说明.docx --name 说明.docx   # → 返回 attach_id

@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.4.1
+version: 0.4.2
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -95,12 +95,12 @@ frcli [--version] [-i INSTANCE] [-v]
     ├── tasks [--page P] [-n N] [--all]      任务列表**含 taskId**（--all = listAll 全量）
     ├── get TASK_NAME [-f]                   任务详情（拿 UUID `id` 用）
     ├── exists TASK_NAME                     按准确名字判断任务是否存在
-    ├── create CONFIG.yaml                   从 YAML 建任务
+    ├── create CONFIG.yaml                   从 YAML 建任务（YAML 怎么来见 §6.11）
     ├── update TASK_NAME [-d DESC]           更新（内部先按名查到 id）
-    ├── delete TASK_ID                       ⚠️ 参数是 UUID `id`，不是任务名
+    ├── delete TASK_ID                       ⚠️ 参数是 UUID `id`，不是任务名（body 为裸数组，见 §6.6）
     ├── run TASK_NAME                        ⚠️ 立即在生产执行该调度
     ├── executing [-f]                       当前正在执行的任务
-    ├── history [TASK_NAME] [-n N] [-f]      执行历史（不传名字=最近全局日志，取 logId 用）
+    ├── history [TASK_NAME] [-n N] [-f]      执行历史（**按时间升序**，不传名字=最近全局日志）
     ├── record TASK_NAME [--page P] [-n N]   某任务的执行记录+结果（含 detailMessage/runType）
     ├── records [--page P] [-n N]            全平台执行记录（total 十万级）
     ├── log TASK_LOG_ID [-f]                 单条日志详情节点树（哪一步失败、错误内容）
@@ -163,10 +163,29 @@ FRCLI_TIMEOUT=600 frcli export batch manifest.yaml
 # 6) 定时任务（读）
 frcli schedule list -f table
 frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID id
-frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 返回 id = logId
+frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id = logId
 frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录+结果（total 分页）
 frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树：哪一步失败
 #   写操作（🔴 先确认）：create / update / delete <UUID> / run <任务名>
+
+# 6.1) 新建任务：拿现成任务当模板（配方与坑见 §6.11）
+frcli schedule get "参照任务名" -f json > src.json
+python3 - <<'PY'
+import json, uuid, yaml
+d = json.load(open("src.json"))
+for k in ["id", "nextFireTime", "preFireTime", "editable", "taskState", "originTaskId"]:
+    d.pop(k, None)
+d["taskName"] = "新任务名"                  # 保持与参照任务同命名风格
+d["creator"] = "00000000"                   # 建任务时带上创建人（PUT 改不掉），别留空
+d["scheduleOutput"]["baseName"] = "新文件名#~_${FORMAT(NOW(), \"yyyyMMdd_HH\")}~#"
+so = d["scheduleOutput"]                    # ⚠️ 必须重置输出 id，否则 create 报 detached entity
+so["id"] = str(uuid.uuid4())
+for a in so["outputActionList"]:
+    a["id"] = str(uuid.uuid4()); a["outputId"] = so["id"]
+yaml.safe_dump(d, open("new.yaml", "w"), allow_unicode=True, sort_keys=False)
+PY
+frcli schedule create new.yaml
+frcli schedule run "新任务名"
 
 # 7) 切换实例（多环境）
 frcli -i dev report list "某目录"
@@ -241,11 +260,12 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 
 ### 6.6 命令名与参数的真实语义
 
-- `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿）。传错会报 `任务不存在` 或删不动。
+- `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿），且请求体是**裸数组** `["<id>"]`。传错会报 `任务不存在` 或删不动。
 - `schedule get` 内部是**模糊搜索取第一条**，任务名需与 `schedule list` 完全一致，避免误命中。
 - `report list <目录>` 结果里会**包含该目录自身**一条（`is_directory: true`），属正常实现，过滤掉即可。
 - `report list /` 会返回**整个服务器**的文件树（实测 3870 条），不要用 `/` 当"顶层"。
 - `schedule history [任务名]` 是 **taskName 精确匹配**：任务近几天没有日志就静默返回 `[]`，不代表 CLI 坏了（不传名字才看全局日志）。
+- ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`（倒序，最新在前）。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。
 
 ### 6.7 改模板内容：REST 没有通道（已实测，别在这上面浪费时间）
@@ -261,20 +281,6 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 - 结论：批量改模板内容 = `report download` 拉 .cpt（XML）→ 本地改 `<Query>` / `<DatabaseName>` → 在 Designer 里导入。
 - `frcli query ...` → 不存在（旧 README 遗留）；要看 SQL 用 `report datasets`。
 
-### 6.10 `format=cpt` 的响应字节不稳定，别用整体 hash 判断"模板有没有被改"
-
-同一模板连续两次取定义，SHA256 就不同（实测 3 次三个值）。逐行 diff 后差异**只有 1 行**：
-
-```
-<![CDATA[org.apache.catalina.core.ApplicationMappingImpl@72d48284]]></O>
-<![CDATA[org.apache.catalina.core.ApplicationMappingImpl@268f721c]]></O>
-```
-
-这是容器对象的 identity hash，每次请求都变（长度相同，所以文件大小看着不变）。
-
-**判据**：要比对模板是否被改动，用**结构化比对** —— `<TableData name>` / `<Query>` / `<DatabaseName>` 的哈希，
-不要用整文件 SHA256。`report download` 拿来 diff 时同理，先剔除这类易变行。
-
 ### 6.8 底层 API（需要扩展 / 直连调试时）
 
 认证 `POST {workspace}/decision/login`（JSON `{username,password}` → `data.accessToken`，**必须保留登录返回的 cookies**，否则被重定向到 CAS）；`workspace` 默认 `/webroot`。
@@ -285,8 +291,8 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 | 模板定义 / 导出 | `/decision/view/report?reportlet=<path>&format=cpt|<pdf/excel/...>` | GET |
 | 任务名列表 | `/decision/v10/schedule/task/names` | GET |
 | 任务搜索/详情 | `/decision/v10/schedule/task/search` | POST `{taskName}` |
-| 任务增/改 | `/decision/v10/schedule/task` | POST / PUT（PUT 体必须含 `id`） |
-| 任务删除 | `/decision/v10/schedule/task/deletes` | POST `{ids:[...]}` |
+| 任务增/改 | `/decision/v10/schedule/task` | POST / PUT（PUT 体必须含 `id`；POST 建任务时带上 `creator` 才会写创建人） |
+| 任务删除 | `/decision/v10/schedule/task/deletes` | POST **裸数组** `["<id>"]`（传 `{ids:[...]}` 会被拒；0.4.2 起 client 按裸数组发并校验返回值） |
 | 立即执行 | `/decision/v10/schedule/task/{id}/once` | POST |
 | 执行历史（只有 id） | `/decision/v10/schedule/task/log/info` | POST `{taskName}` |
 | 执行记录 + 结果 | `/decision/v10/schedule/record/search` | POST `{taskName,page,perPage}` |
@@ -326,6 +332,63 @@ CLI 已翻成异常：`API_ERROR` + 平台原文（`_unwrap_json`）。要挖更
 
 实测服务端 bug：`POST /v10/schedule/task/log/search` 抛 `QueryConditionImpl cannot be cast to TaskLogRestriction`，该版本不可用 —— 用 `log/info` + `log/details` 代替。
 
+### 6.10 `format=cpt` 的响应字节不稳定，别用整体 hash 判断"模板有没有被改"
+
+同一模板连续两次取定义，SHA256 就不同（实测 3 次三个值）。逐行 diff 后差异**只有 1 行**：
+
+```
+<![CDATA[org.apache.catalina.core.ApplicationMappingImpl@72d48284]]></O>
+<![CDATA[org.apache.catalina.core.ApplicationMappingImpl@268f721c]]></O>
+```
+
+这是容器对象的 identity hash，每次请求都变（长度相同，所以文件大小看着不变）。
+
+**判据**：要比对模板是否被改动，用**结构化比对** —— `<TableData name>` / `<Query>` / `<DatabaseName>` 的哈希，
+不要用整文件 SHA256。`report download` 拿来 diff 时同理，先剔除这类易变行。
+
+### 6.11 `schedule create` 的 YAML 怎么来（不重置输出 id 必失败）
+
+平台的定时任务是一个嵌套对象（`triggerGroup` / `scheduleOutput` / `taskParameter` / `outputStr` …），
+没有独立的建任务接口文档，**最省事的做法是拿一个现成任务当模板**：
+
+```bash
+frcli schedule get "参照任务名" -f json > src.json     # 完整详情
+# 去掉只读字段：id / nextFireTime / preFireTime / editable / taskState / originTaskId
+# 改：taskName、templatePath、taskDescription、scheduleOutput.baseName、taskParameter.param 的值
+# 可选建议：creator（建任务时带上创建人；PUT 改不掉 creator，留空会让按创建人过滤的平台页面看不到）
+# ⚠️ 必须重置：scheduleOutput.id、outputActionList[].id、outputActionList[].outputId
+frcli schedule create new.yaml
+```
+
+- **不重置输出 id 的报错**（实测）：`detached entity passed to persist: com.fr.schedule.base.entity.ScheduleOutputEntity`
+  —— 服务端把沿用源任务的 `ScheduleOutputEntity.id` 当新实体 persist，直接 200 + HTML 出错页。
+  重置成新 UUID 后同一个 YAML 立刻建成功。
+- `update`（PUT）只改了描述/参数这类字段时是安全的：PUT 会保留未动的字段（实测改 `taskParameter` 后
+  `baseName` / `triggerGroup` / `outputActionList` 原样保留）；但它改不掉 `creator`。
+- `create` 也支持「只执行一次」这类配置：`triggerGroup.triggers` 里 `triggerType:"1"` + `startType/endType:1`，
+  建完 `taskState.value` 会是 `2`（已完成）。
+
+### 6.12 自定义类输出（FeishuPushPlus10V2 等）的日志是**异步**写的
+
+任务日志节点树里，`模板计算` / `导出cpr` / `导出pdf` 跑完就有，但**自定义类那一步（`自定义类附件处理`）
+要等约 5 分钟才出现**——它包含导出 xlsx → 上传云空间 → 群发链接。实测同一任务：
+
+| 运行 logTime | 前三个节点 | 自定义类附件处理（结束时间） |
+|---|---|---|
+| 14:35:49 | 14:36:23 / 14:36:29 / 14:36:34 | 14:40:47 |
+| 14:45:16 | 14:45:46 / 14:45:52 / 14:45:57 | 14:50:10 |
+
+所以**别因为当场看不到那一步就判定「任务没配自定义类 / 模板没生效」**：要么等几分钟重读 `schedule log`，
+要么直接查推送结果（如帆软平台的 `system/weixin/推送日志.cpt`）。
+
+### 6.13 「参数默认填什么」看 `report paras`，不是看参照任务
+
+`frcli report paras <模板>` 返回的是**模板里存的默认参数值**（含类型 `Formula` / `String`），
+建任务时「参数默认」就该用它——照抄参照任务的参数值可能错（参照任务的参数是它自己那份模板的默认值）。
+
+例：`示例报表A.cpt` 的默认 `sdate` 是 **String `20260924`**（模板正文也写着「累计时间从20260924开始」），
+而 `示例报表B.cpt` 的默认 `sdate` 是 **Formula 月首**。两张模板的参数名一样，值不能互抄。
+
 ## 7. 故障排查
 
 | 现象 | 处理 |
@@ -341,7 +404,10 @@ CLI 已翻成异常：`API_ERROR` + 平台原文（`_unwrap_json`）。要挖更
 | `report datasets` 返回 `[]` | 该报表数据集在服务端报错，报表本身是坏的（§6.5） |
 | `'FineReportClient' object has no attribute 'upload_report'` | `report upload/delete` 未实现；**服务器也没有写模板内容的 REST 接口**（§6.7），改模板走 Designer |
 | `任务不存在: xxx` | `schedule get/run/update` 用准确任务名（先 `schedule list`） |
-| `schedule delete` 删不掉 | 传 UUID `id` 而非任务名（§6.6） |
+| `schedule delete` 删不掉 | 传 UUID `id` 而非任务名（§6.6）；0.4.2 起会按裸数组删并校验，旧版报 `deleted: true` 也可能是假成功 |
+| `schedule create` 报 `detached entity passed to persist: ScheduleOutputEntity` | YAML 沿用了源任务的 `scheduleOutput.id`/输出 action id，换成新 UUID（§6.11） |
+| 任务跑完日志缺「自定义类附件处理」 | 那一步是异步的，约 5 分钟后才写日志，别据此判定配置没生效（§6.12） |
+| `schedule history -n 1` 拿到的不是最新一次 | 返回按时间**升序**，`-n 1` 是最早那条；放大 `-n` 取最后一条，或改用 `schedule record`（§6.6） |
 | `report paras` 返回 `[]` | 该报表没有参数 **或路径不存在**（平台对不存在的路径也返回空）；先用 `report list <目录>` 核对路径 |
 | `API_ERROR: Required String parameter ...` / `请求方法不支持` / `无此接口权限` | 直接调底层接口时的平台原文，按提示补参数/换方法/换账号（§6.9） |
 | `API_ERROR: 平台返回错误页（无详细信息）` | 多为对象不存在：`schedule log` 的 logId 已过期或被清理，用 `schedule history` 重新取（§6.9） |
