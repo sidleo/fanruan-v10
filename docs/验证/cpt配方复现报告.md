@@ -1,5 +1,8 @@
 # cpt 配方集独立复现报告（`references/cpt-patterns.md`）
 
+> ⚠️ 本文提到的证据图片/产物已从仓库移除（服务端渲染带个人水印与真实数据）；重建方法见 `docs/验证/证据/README.md`。
+
+
 > **复现者**：`patternverifier`（独立验证者）。**没有读过 `src/frcli/` 源码，没有询问作者**；
 > 只照 `references/cpt-patterns.md` + `SKILL.md` 的命令语法重建，服务端产物逐格读回。
 > **复现产物**：全部新建在 `demo_group/demo_user/skill测试/repro/`（写范围内），

@@ -1,5 +1,8 @@
 # cpt 创作能力验证报告（第一轮 · 独立验证）
 
+> ⚠️ 本文提到的证据图片/产物已从仓库移除（服务端渲染带个人水印与真实数据）；重建方法见 `docs/验证/证据/README.md`。
+
+
 > 验证者：`cpt-verifier`（teammate）｜日期：2026-09-27｜仓库版本：fanruan-v10 0.6.0
 > 服务器：fr.example.com（10.0.19）｜账号：00000000
 > 测试目录（唯一允许写）：`demo_group/demo_user/skill测试`
