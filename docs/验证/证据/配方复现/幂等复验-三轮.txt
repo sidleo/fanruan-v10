@@ -1,0 +1,74 @@
+########## 第 1 遍（从零建） ##########
+new      EXIT=0 status=ok changed=True note=None changes=['template.create']
+dataset  EXIT=0 status=ok changed=True note=None changes=['dataset.add']
+table    EXIT=0 NON-JSON: ⚠ 列名（center、sales、amt）不做离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对
+{
+  "action": "table",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt",
+  "applied": true,
+  "dry_run": false,
+  "bytes_befor
+mode A3  EXIT=0 status=ok changed=True note=None changes=['cell.ds-mode']
+D3 占比  EXIT=0 status=ok changed=True note=None changes=['style.add', 'cell.insert']
+A4 小计  EXIT=0 status=ok changed=True note=None changes=['cell.insert']
+C4 汇总  EXIT=0 NON-JSON: ⚠ 列名 'amt' 无法离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对一下
+⚠ 汇总列必须是**数值列**：文本列上做 sum/avg 服务端会静默得到 0（不报错）；列类型无法离线校验，导出后请核对汇总值
+{
+  "action": "cell",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt
+A5 总计  EXIT=0 status=ok changed=True note=None changes=['cell.insert']
+C5 公式  EXIT=0 status=ok changed=True note=None changes=['cell.insert']
+SHA(前16)=6854d0f4f6a5edeb  StyleList 元素数=2
+########## 第 2 遍（同配方原样重跑） ##########
+new      EXIT=1 status=error changed=None note=None changes=None
+dataset  EXIT=1 status=error changed=None note=None changes=None
+table    EXIT=0 NON-JSON: ⚠ 列名（center、sales、amt）不做离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对
+{
+  "action": "table",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt",
+  "applied": true,
+  "dry_run": false,
+  "bytes_befor
+mode A3  EXIT=0 status=ok changed=True note=None changes=['cell.ds-mode']
+D3 占比  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['style.add']
+A4 小计  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+C4 汇总  EXIT=0 NON-JSON: ⚠ 列名 'amt' 无法离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对一下
+⚠ 汇总列必须是**数值列**：文本列上做 sum/avg 服务端会静默得到 0（不报错）；列类型无法离线校验，导出后请核对汇总值
+{
+  "action": "cell",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt
+A5 总计  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+C5 公式  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+SHA(前16)=6854d0f4f6a5edeb  StyleList 元素数=2
+########## 第 3 遍（再重跑，验证稳定性） ##########
+new      EXIT=1 status=error changed=None note=None changes=None
+dataset  EXIT=1 status=error changed=None note=None changes=None
+table    EXIT=0 NON-JSON: ⚠ 列名（center、sales、amt）不做离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对
+{
+  "action": "table",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt",
+  "applied": true,
+  "dry_run": false,
+  "bytes_befor
+mode A3  EXIT=0 status=ok changed=True note=None changes=['cell.ds-mode']
+D3 占比  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['style.add']
+A4 小计  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+C4 汇总  EXIT=0 NON-JSON: ⚠ 列名 'amt' 无法离线校验（要连库才知道）：写错不会报错，只会渲染出空列；导出后请核对一下
+⚠ 汇总列必须是**数值列**：文本列上做 sum/avg 服务端会静默得到 0（不报错）；列类型无法离线校验，导出后请核对汇总值
+{
+  "action": "cell",
+  "remote": "reportlets/demo_group/demo_user/skill测试/repro/pv_idem2.cpt
+A5 总计  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+C5 公式  EXIT=0 status=ok changed=False note=内容无变化（已经是目标状态），未发起写请求 changes=['noop']
+SHA(前16)=6854d0f4f6a5edeb  StyleList 元素数=2
+########## 导出（确认内容未变） ##########
+dims A2:D10 merged ['A3:A5', 'A7:A8']
+2 ['中心', '销售员', '金额', None]
+3 ['SC04', '张三', 100.0, 0.06666666666666667]
+4 [None, '李四', 200.0, 0.13333333333333333]
+5 [None, '王五', 300.0, 0.2]
+6 ['小计', None, 600.0, None]
+7 ['SC03', '赵六', 400.0, 0.26666666666666666]
+8 [None, '钱七', 500.0, 0.3333333333333333]
+9 ['小计', None, 900.0, None]
+10 ['总计', None, 1500.0, None]

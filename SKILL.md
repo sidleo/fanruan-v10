@@ -1,7 +1,7 @@
 ---
 name: fanruan-v10
-version: 0.4.2
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+version: 0.10.0
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
     bins: ["frcli"]
@@ -19,8 +19,14 @@ metadata:
 - 查看报表的数据集定义与 SQL（口径溯源、找报表参数）
 - 查/改/跑 FineReport 定时任务（调度、执行历史）
 - 定位「报表里这个数怎么来的」
+- **改已有模板**：`report upload` 覆盖 / `report delete` 删除；
+  `report edit` 定点改**数据集 SQL / 连接 / 参数**（§6.7）；改**单元格**用 `report cell`（§6.14）
+- **从零创作模板**：`report new / dataset / table / cell / param / style` 造出一张能取数的报表
+  —— 五步上手与语法速查见 **`references/cpt-authoring.md`**；纯文本+公式+取数表+参数+样式都能写
 
-不适合：改报表模板本身（.cpt 设计）——服务器无 Web API，走决策平台网页。
+不适合：**画复杂版面**（图表控件、填报控件、复杂表头嵌套、决策报表 .frm 的组件布局）——
+这些仍然建议在 Designer 里做。本 CLI 能做的是「单元格网格 + 数据集绑定 + 扩展 + 样式 + 参数」
+这一层，覆盖绝大多数**取数类报表**。
 
 ## 2. 前置条件
 
@@ -54,16 +60,68 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── info REPORT [-f]                     报表信息：数据集名清单 + 参数清单
 │   ├── paras REPORT [-f json|table]         报表参数定义（官方接口，含派生参数公式）
 │   ├── datasets REPORT [-f json|table] [--sql]   数据集名/参数/完整 SQL（--sql 不截断）
-│   ├── download REPORT [-o LOCAL]           下载 .cpt 模板（实测 3.4MB XML）
+│   ├── download REPORT [-o LOCAL]           下载模板**原始字节**（走远程设计通道，与 upload 同源）
 │   ├── serverdatasets [-f]                  服务器数据集清单（平台级，实测 113 个）
 │   ├── columns DATASET [-f]                 服务器数据集的字段清单（列名/列类型）
 │   ├── authed [--keyword K]                 当前账号有权限的模板树
-│   ├── upload LOCAL REMOTE                  ❌ 未实现（服务器无写模板内容的 REST 接口，见 §6.7）
-│   └── delete REPORT                        ❌ 未实现（同上）
+│   ├── upload LOCAL REMOTE [--force]        🔴 上传/覆盖服务端模板（远程设计通道，见 §6.7）
+│   │                                          写前占锁+自动备份到 ~/.frcli/backups/，写后回读校验 SHA256
+│   ├── delete REPORT --force                🔴 删除服务端模板（移入回收站，可恢复）
+│   ├── ws-list [PATH]                       服务端远程工作区目录树（reportlets 下就是模板目录）
+│   ├── fonts REPORT [-f]                    体检：模板用到但服务端**缺失**的字体（空 = 没问题）
+│   ├── versions REPORT [-n 20] [-f]         模板的远程设计提交历史（版本号/提交人/时间，🟢 只读）
+│   ├── image REPORT [-o FILE] [--form]      服务端直接渲染成 PNG（🟢 只读，不走 REST 导出）
+│   │                                          .cpt 走 exportWorkBookAsImageData；.frm 加 --form
+│   ├── edit REPORT [--list] [--dataset D] [--sql S | --sql-file F | --replace OLD=NEW …]
+│   │              [--connection C] [--param P --default V] [--apply] [--any-path]  结构化改模板（见 §6.7）
+│   │              ⚠️ **默认 dry-run 只打印 diff**；`--apply` 才写，且必须先设 $FRCLI_WRITE_SCOPE
+│   │                 或加 --any-path（不设范围 = 拒绝，见 §4 安全约束）
+│   ├── new REMOTE [--sheet NAME] [--from TEMPLATE] [--output FILE] [--force]   从零建空白模板（见 §6.14）
+│   ├── cell REMOTE --list [-f table]                     只读列单元格：A1/值/公式/绑定/扩展/样式
+│   │        [--at B3 --set-value|--set-formula|--bind ds.col|--expand v|h|none|
+│   │         --style N|--num-format FMT|--bold|--bg C|--align X|--border|--merge A1:C1|--clear|
+│   │         --ds-result EXPR|--ds-filter EXPR|--expand-left A3|--expand-up B1|--show-html]
+│   │        [--sheet S] [--apply] [--any-path]           改单元格（默认 dry-run；地址用 A1 记法）
+│   ├── dataset REMOTE --list [--full]                    只读列数据集（读**模板字节**，非 format=cpt）
+│   │        --add NAME --conn C --sql S|--sql-file F [--param p=v …] [--page-sql S]
+│   │        --set-sql NAME --sql S [--param p=v …] | --remove NAME   [--apply] [--any-path]
+│   ├── param REMOTE --list | --add p=v … | --set-default p=v … | --remove p … [--apply]
+│   │                                                     模板参数（公式里的 `$x` 靠它给默认值）
+│   ├── style REMOTE --list | --add [--xml-file F | --num-format FMT --bold --bg C --align X --border]
+│   │                                                     样式表（数字格式/粗体/底色/边框），加完用 --style N 绑
+│   ├── table REMOTE --dataset ds --at A1 --columns a,b,c [--header] [--labels "x,y,z"]
+│   │          [--expand v|h|none] [--mode list|group|summary] [--fn sum] [--group-by x,y]
+│   │          [--widths 12,16] [--style N] [--header-style N] [--apply] [--any-path]
+│   │                                                     一次生成整张取数表（表头+逐列绑定+扩展）
+│   ├── crosstab REMOTE --dataset ds --at A3 --row a,b --col c --value v
+│   │          [--agg sum|count|avg|max|min] [--total-row] [--total-col] [--no-header]
+│   │          [--label S] [--value-labels x,y] [--style N] [--header-style N] [--widths W]
+│   │                                                     交叉表/动态列（行×列×值，列数随数据自动增长）
+│   ├── highlight REMOTE --at D3|A3:D3 --rule '条件:动作' [--rule …] | --clear | --list
+│   │          [--sheet S] [--apply] [--any-path]          条件属性：阈值标红/热力图/隔行变色/隐藏整行
+│   │          条件 `v>100`（值比较）或 `ROW()%2=0`（公式）；动作 bg=/fg=/bold/size=/font=/
+│   │          rowheight=0(隐藏整行)/value=/border；**规则按顺序生效，后面的覆盖前面的**
+│   ├── page REMOTE --list | --header-height N --footer-height N --freeze 列,行
+│   │          --repeat-rows 3,4 | --no-repeat-rows 3,4
+│   │          --repeat-header-rows 1:1 | --repeat-footer-rows a:b | --repeat-header-cols c:d
+│   │          --header-text S | --footer-text S [--footer-formula] [--footer-position x]
+│   │          --page-freeze on|off                      分页设置（重复标题行/页眉页脚页码/冻结）
+│   ├── chart REMOTE --at A1 --dataset ds --type column|line|pie|ring --category C
+│   │          [--series S] --value V [--fn sum] [--title T] [--show-title] [--cs N] [--rs N]
+│   │          | --list                                  图表（VanChart；导出 xlsx 是嵌入图片）
+│   ├── widget REMOTE --param p --type combo|date|text|check|number [--options "a,b"]
+│   │          [--default v] [--label L] [--x/--y/--width/--height] | --list
+│   │                                                     参数面板控件（**控件名=参数名** 才联动）
+│   └── link REMOTE --at A3 --to 报表路径|URL [--type reportlet|web|javascript]
+│              [--param k=v …] [--frame _self|_blank] | --clear | --list
+│                                                        单元格超链接/钻取（纯预览态交互）
+│    ⚠️ 上面 12 条创作命令**默认 dry-run**，`--apply` 才写；语法与配方见 references/cpt-authoring.md、
+│       **references/cpt-patterns.md**（第一辑 8 类）、**references/cpt-patterns2.md**（第二辑：
+│       图表/参数控件/钻取/层次坐标/分页，含"写错的对照"）
 │
 ├── export                          报表导出（真实触发服务端计算）
 │   ├── pdf|excel|word|image|csv REPORT [-o FILE] [--params JSON] [-i]
-│   │        缺省输出名派生自报表名：.pdf / .xlsx / .docx / .png / .csv
+│   │        缺省输出名派生自报表名：.pdf / .xlsx / .rtf(word 实际是 RTF) / .png / .csv
 │   └── batch MANIFEST.yaml [-i]             批量导出（YAML 清单，逐条汇总成败）
 │
 ├── attach                          服务器附件（落附件缓存，**不动报表目录**）
@@ -119,11 +177,14 @@ demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
 
 | 等级 | 命令 | 说明 |
 |------|------|------|
-| 🟢 只读 | `server list/test`、`report list/info/paras/datasets/download/serverdatasets/columns/authed`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
+| 🟢 只读 | `server list/test`、`report list/info/paras/datasets/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
 | 🟡 计算 | `export *`、`export batch` | 数据只读，但服务端真实跑报表（复杂报表 50s+，批量可达数十分钟）；批量前说明规模 |
 | 🟠 本地写 | `server add/remove/set-default` | 只改实测环境 `~/.frcli/config.yaml` 与 token 缓存 |
+| 🧱 写范围（**默认拒绝**） | 环境变量 `FRCLI_WRITE_SCOPE=<目录>`，或命令行 `--any-path` | **没设范围又没 `--any-path` → 写命令直接拒绝**（沉默 ≠ 不限制）。设了范围则 `report upload/delete/edit/new/cell/dataset/param/style/table --apply`/`rpc` 写调用只允许落在该目录下，含 `..` 穿越、兄弟目录（`<scope>.tmp`、`<scope>x`）一律拦截 |
 | 🟠 服务端写（轻） | `attach upload/remove` | 只往**服务器附件缓存**写/删文件，不碰报表目录与调度；upload 会在服务端留文件，用完 `remove` 清理 |
 | 🔴 危险 | `schedule create/update/delete/run` | 直接改/跑**生产调度**：`run` 会立刻执行并推送下游（飞书/FTP/邮件），`delete` 不可逆 |
+| 🔴 危险 | `report upload` / `report delete` | 直接改**生产模板文件**：影响所有看这张报表的人。upload 覆盖需 `--force`（自动备份原文件）；delete 移入回收站可恢复，但需 `--force`；**目标是目录时必须再加 `--recursive`**（不加直接拒绝） |
+| 🟠 服务端写（模板创作） | `report new` / `cell` / `dataset` / `param` / `style` / `table`（**默认 dry-run，`--apply` 才写**） | 与 `report edit --apply` 同一道写范围守门 + 占锁 + 备份 + 回读 SHA256；新建/改动只应落在你被授权的目录 |
 
 agent 默认直接执行只读；🟡 批量前说明；🔴 必须先向用户确认影响范围再执行。
 
@@ -188,7 +249,20 @@ frcli schedule create new.yaml
 frcli schedule run "新任务名"
 
 # 7) 切换实例（多环境）
-frcli -i dev report list "某目录"
+frcli -i dev report list "某目录"        # 顶层 -i 现在对所有子命令生效（0.6.0 前被静默忽略！）
+frcli report list "某目录" -i dev         # 子命令级 -i，优先级更高
+export FRCLI_INSTANCE=dev                 # 也可以用环境变量钉住实例
+frcli -i nosuch report list "某目录"      # 实例不存在 → 直接 CONFIG_ERROR，绝不会回落到默认实例
+
+# 7.5) 改服务端模板（🔴 先确认影响范围；走远程设计通道）
+frcli report ws-list "demo_group/demo_user"                  # 看服务端真实路径（只读）
+frcli report download "demo_group/demo_user/临时/a.cpt" -o a.cpt   # 拉下来
+#   ……本地改 a.cpt（XML：<Query>/<DatabaseName>/<TableData>…）……
+#   ⚠️ 写命令默认拒绝：先限定范围，或对本次目标显式 --any-path
+export FRCLI_WRITE_SCOPE="demo_group/demo_user/临时"      # 推荐：限定范围
+frcli report upload a.cpt "demo_group/demo_user/临时/a.cpt" --force
+#   → 自动占锁 + 备份原文件到 ~/.frcli/backups/ + 回读 SHA256 校验
+frcli report delete "demo_group/demo_user/临时/a.cpt" --force    # 移入回收站
 
 # 8) 附件（服务器附件缓存，非报表目录）
 frcli attach upload /tmp/说明.docx --name 说明.docx   # → 返回 attach_id
@@ -221,16 +295,21 @@ frcli schedule setting
 `frcli export` 只看 HTTP 状态码，而 FineReport 出错时仍返回 **200 + HTML 出错页面**，CLI 会照写文件并报 `status: ok`。
 典型触发：数据集 SQL 报错（如 `错误代码:11300001 数据集 [xxx] 配置错误 [ImpalaJDBCDriver] Could not resolve column/field reference`）、缺必填参数。
 
-**必须校验魔数**：
+**必须校验魔数**（0.6.0 起 `export` 已内置 `assert_export_magic`，不符直接报错）：
 
-| 格式 | 文件头 |
-|------|--------|
-| xlsx / docx | `PK\x03\x04` |
-| pdf | `%PDF` |
-| png | `\x89PNG` |
-| 失败 | HTML，含 `<title>出错页面</title>` / `Oops!!!` |
+| 格式 | 文件头 | 备注 |
+|------|--------|------|
+| xlsx（excel） | `PK\x03\x04` | |
+| **word** | `{\rtf1`（`7b5c72746631`） | ⚠️ 帆软 `format=word` 出的是 **RTF 不是 docx**，落盘默认名是 `.rtf`；按 `PK` 校验会把好文件判成坏文件 |
+| pdf | `%PDF` | |
+| png（image） | `\x89PNG` | |
+| csv（text） | 无魔数 | 靠内容判断 |
+| 出错页 | HTML，含 `出错页面` / `Oops!!!` / `detail-message` | 200 + HTML，不看魔数会当成功 |
+| **排队页** | HTML，含 `Dec-Waiting_In_Line` | 并发/限流时的「排队中」页，**无 title 无 detail-message**，2KB 左右；重试一次通常即成功，批量导出要降并发（0.6.0 起 `export` 会识别并报错） |
 
-出错页面里的 `detail-message` 是 html 实体编码的**具体报错**（错误代码 + 原始 SQL），解码后可直接定位坏数据集。
+出错页的 `detail-message` 是 html 实体编码的**具体报错**（错误代码 + 原始 SQL），解码后可直接定位坏数据集。
+⚠️ 该属性有**单引号**（`id='detail-message'`）和双引号两种写法，解析要都认（0.6.0 前只认双引号，单引号页会退化成
+「响应不是 JSON」这种没用的提示）。
 
 ### 6.2 默认 30s 超时，复杂报表必然超时
 
@@ -268,18 +347,104 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 - ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`（倒序，最新在前）。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。
 
-### 6.7 改模板内容：REST 没有通道（已实测，别在这上面浪费时间）
+### 6.7 改模板内容 = 远程设计通道（0.5.0 起已实现，别再找 REST）
 
-- `report upload` / `report delete` → `'FineReportClient' object has no attribute ...`：CLI 有入口但 client 无实现。
-- **服务器侧确实没有"写模板内容"的 REST 接口**（2026-09 实测 + 反编译确认）：
-  - `TemplateBean` / `FileBean` 只有元数据字段（id/pId/text/path/description/showType/parameters…），**没有内容字段**；
-  - `ReportEntryService.addTemplates()` 只写条目记录，无落盘调用；
-  - 569 条路由里没有任何接口接收 .cpt 字节。
-- 目录管理类写接口（`PUT /v10/template/{id}`、`POST /v10/{directoryId}/templates`、`PUT /v10/file/{id}`、`POST /v10/{pId}/directory`、`PUT /v10/entry(s)`、`POST /v10/dataset/upload`）对普通分析账号一律 `Fine-Dec_No_Privilege_Access_Page`。
-- Designer 存模板走 `/decision/remote/design/service`（28 个内部 RPC 服务：`TplOperator`/`CommitHelper`/`EditLockOperator`/`EncryptOperator`…），载荷 **SM4 加密**（`/remote/design/check` 返回 `transmissionEncryption:2` + `frontSM4Key`/`frontSeed`）→ 抓包也拿不到明文，不建议复刻。
-- **唯一可用的服务端写操作是附件**（`attach upload/remove`，见 §3/§4）。
-- 结论：批量改模板内容 = `report download` 拉 .cpt（XML）→ 本地改 `<Query>` / `<DatabaseName>` → 在 Designer 里导入。
-- `frcli query ...` → 不存在（旧 README 遗留）；要看 SQL 用 `report datasets`。
+**结论**：REST 确实没有写模板内容的接口（569 条路由全查过），但决策平台另有一条
+「远程设计」通道，Power 足够，已复刻进 `frcli report upload/delete`。
+
+- 通道：`POST {workspace}/decision/remote/design/check|verify|channel`。
+  `/channel` 是一个**通用反射 RPC 网关**：body 里给「声明类名 + 方法名 + 参数类型 + 参数」，
+  服务端 `WorkspaceServerInvoker` 直接 `Class.forName(...).getDeclaredMethod(...).invoke(...)`。
+  可调用的服务清单：`POST /decision/remote/design/service`（本服务器 28 个），其中
+  - `com.fr.workspace.resource.WorkResource` = 服务端 `WEB-INF` 远程文件系统
+    （readFully/exist/length/list/write/delete/rename/createDirectory…）
+  - `com.fr.workspace.server.lock.TplOperator` = 模板锁与删除
+    （readAndLockFile/closeAndFreeFile/delete，delete 是**移入回收站**不是物理删）
+- 报文不是 JSON：`gzip( Java 对象流(InvocationPack) + Java 对象流(HashMap metadata) )`；
+  参数各自是 `Java 对象流(mark="JDK") + Java 对象流(value)`。
+  Python 侧实现在 `src/frcli/jser.py`（手写 Java 序列化），与帆软原件逐字节一致（见
+  `tests/test_remotedesign.py` 里固化的 Designer 原报文）。
+- 密码要加密后再发 `/verify`：`/check` 返回 `transmissionEncryption`（0=RSA 1=SM2 2=AES 3=SM4）
+  与 `frontSeed`/`frontSM4Key`；AES = `AES/ECB/PKCS5Padding`、key = frontSeed 前 16 字节补零，
+  SM4 = `SM4/ECB` + ISO7816 填充（0x80 补零）、key = frontSM4Key（32 位 hex）。
+  纯 Python 实现在 `src/frcli/rdcrypto.py`，与 `SecurityToolbox` 输出逐字节一致。
+- **权限**：路径含 `reportlets` 时查该账号的「远程设计」授权目录；不含则完全不校验。
+  ⚠️ 无权限时 `write` **静默不写也不报错** → 写完必须回读校验（`upload` 已内置 SHA256 比对）。
+- 路径：远程工作区根 = 服务端 `WEB-INF`。平台展示路径 `A/B/x.cpt` 对应
+  `reportlets/A/B/x.cpt`（`report upload` 会自动补 `reportlets/` 前缀）。
+- 覆盖已有模板前 `TplOperator.readAndLockFile` 先占锁：**别人 Designer 里开着就拒绝写**
+  （避免互相覆盖）；`upload` 会把原文件备份到 `~/.frcli/backups/`；写完 `closeAndFreeFile` 释放。
+- 实测（2026-09，fr.example.com）：新建 .cpt → 回读 SHA256 一致 → **决策平台模板树立即出现
+  该模板、`report info` 能解析出数据集清单**；覆盖、删除（回收站）均通过。
+- 上传后平台侧缓存：服务端按文件 mtime 失效模板缓存，实测无需额外刷新动作。
+- 协议原文与「换版本后怎么复核」见 `references/remotedesign.md`（含用实测环境 Designer jar
+  生成参照报文、逐字节比对的脚本）。
+- **28 个服务的全量签名**（150 个方法 + 只读/写/deny 判定 + 所在 jar）：`references/remote-services.md`。
+  用 `frcli rpc services` 看线上清单，`frcli rpc methods <类>` 看签名。
+- **cpt XML 结构速查**（`WorkBook`/`TableData`/`Query`/`DatabaseName` 层级与可改点、
+  定点替换为什么不能用 ElementTree）：`references/cpt-xml.md`。
+
+#### 路径口径：三种服务收的路径**不一样**（写错不报错，只返回空）
+
+| 服务 / 入口 | 收什么 | 例 |
+|---|---|---|
+| `WorkResource` / `TplOperator`（`report upload/delete/download/ws-list`、`rpc call` 的读写删锁） | **工作区路径** | `reportlets/demo_group/demo_user/x.cpt` |
+| `VcsOperator` / `TemplateExportOperator` / `TemplateChecker`（`report versions/image/fonts`） | **展示路径** | `demo_group/demo_user/x.cpt` |
+| REST（`report list/info/datasets/paras`、`export`） | **展示路径** | 同上 |
+
+前缀写错**不会报错**：工作区路径少 `reportlets/` → 空目录 / `false` / 0 字节；
+展示路径多 `reportlets/` → 空列表。`rpc call` 遇到这种情况会回一句 `hint` 指路口径。
+⚠️ `report versions` / `rpc call VcsOperator getVersions` 传错前缀时**静默返回 `[]`**，
+别当成「这张报表没有历史版本」。
+
+#### 改模板内容不必再整文件替换：`report edit`
+
+```
+report edit REPORT [--list]
+              [--dataset D] [--sql S | --sql-file F | --replace OLD=NEW …]
+              [--connection C] [--param P --default V] [--apply]
+```
+
+拉模板（远程设计通道）→ **结构化改 XML**（`cptxml.set_text` 定点替换，只动目标元素的
+字节区间，其余逐字节保留；不是正则、也不是 ElementTree 往返）→ 打印 diff。
+**默认 dry-run**；`--apply` 才写，写前过 `assert_in_write_scope`（**fail-closed**：
+没设 `$FRCLI_WRITE_SCOPE` 就必须 `--any-path`）+ `assert_template_bytes`，
+写时占锁 + 备份 + 回读校验。
+
+实测（2026-09，测试目录副本）：`FRCLI_WRITE_SCOPE=reportlets/demo_group/demo_user/skill测试 \
+frcli report edit …/x.cpt --dataset xs --replace "'20251013'='20251101'" --apply`
+→ `verified: true`、备份落 `~/.frcli/backups/`、改后 SQL 区间前后字节与原文完全一致，
+且 `report datasets --sql` 能读到新日期。
+
+#### ⚠️ `format=cpt` 不是模板文件字节（0.5.1 前 `report download` 的坑）
+
+`GET /decision/view/report?reportlet=X&format=cpt` 返回的是**另一种序列化**，不是服务器上那个 .cpt：
+
+| 来源 | 根元素 | 同一张模板实测 |
+|------|--------|----------------|
+| 远程设计通道 `readFully`（= 服务器上的文件） | `<WorkBook>` | 4510 B |
+| `format=cpt` | `<TableDataMap>`（缺 `<WorkBook>`/`<StyleList>`） | 6362 B |
+
+两者 SHA256 不同。拿 `format=cpt` 的产物 `report upload --force` 会**把模板写坏**，而且
+写后回读校验还是通过的（写进去的确实是那份 stub）——静默毁报表（0.5.1 前 `report download`
+就是走这个端点，所以 `download → 改 → upload` 是条毁数据的流程）。
+
+现在的守门：
+- `report download` 改走远程设计通道，落盘字节与服务器**逐字节相同**（要该路径有远程设计授权）
+- `report upload` 默认断言「前 600 字节含 `<WorkBook>`」，否则拒绝写入（`--allow-format` 才放行）
+- 要数据集定义/ SQL 用 `report datasets`（它本来就走 `format=cpt` 并解析 `<TableData>`）
+
+<details><summary>历史结论（已作废，保留备查）</summary>
+
+- `report upload` / `report delete` 旧版是空壳（`'FineReportClient' object has no attribute ...`）。
+- `TemplateBean` / `FileBean` 只有元数据字段（id/pId/text/path/description/showType/parameters…），
+  没有内容字段；`ReportEntryService.addTemplates()` 只写条目记录；目录管理类写接口
+  （`PUT /v10/template/{id}`、`POST /v10/{directoryId}/templates`、`PUT /v10/file/{id}`、
+  `PUT /v10/entry(s)`、`POST /v10/dataset/upload`）对普通分析账号一律
+  `Fine-Dec_No_Privilege_Access_Page`。
+- 此前误判「远程设计载荷 SM4 加密、抓包拿不到明文、不建议复刻」：加密只作用于**密码字段**，
+  `/channel` 的 RPC 载荷是 gzip + Java 序列化，可完整复刻。
+</details>
 
 ### 6.8 底层 API（需要扩展 / 直连调试时）
 
@@ -298,6 +463,11 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 | 执行记录 + 结果 | `/decision/v10/schedule/record/search` | POST `{taskName,page,perPage}` |
 | 日志详情节点树 | `/decision/v10/schedule/task/log/details?taskLogId=<id>` | GET |
 | 报表参数（官方） | `/decision/v10/report/template/paras?path=<path>` | GET |
+| 远程设计握手 | `/decision/remote/design/check` | POST（返回 frontSeed/frontSM4Key/transmissionEncryption） |
+| 远程设计取 token | `/decision/remote/design/verify` | POST 表单 `username` + **加密后**的 `password` |
+| 远程设计 RPC | `/decision/remote/design/channel` | POST，body = gzip + Java 序列化 Invocation |
+| 远程设计服务清单 | `/decision/remote/design/service` | POST 表单 `username`+`password` |
+| 远程设计许可/版本 | `/decision/remote/design/vt`、`/version`、`/branch` | POST |
 | 服务端版本 | `/decision/system/version` | GET |
 | 任务全量（带 taskId） | `/decision/v10/schedule/task/listAll/2` | GET |
 | 任务分页（带 taskId） | `/decision/v10/schedule/task/list/2?page=&count=` | GET |
@@ -389,11 +559,140 @@ frcli schedule create new.yaml
 例：`示例报表A.cpt` 的默认 `sdate` 是 **String `20260924`**（模板正文也写着「累计时间从20260924开始」），
 而 `示例报表B.cpt` 的默认 `sdate` 是 **Formula 月首**。两张模板的参数名一样，值不能互抄。
 
+### 6.14 从零创作模板（0.8.0 起）：`report new/cell/dataset/param/style/table/crosstab/highlight/page`
+
+不用 Designer 也能造报表：**cpt 就是 XML**，`report new` 给骨架，其余命令按 A1 记法改。
+完整语法、配方与验证方法见 **`references/cpt-authoring.md`**（那张表要照着它抄）。要点：
+
+| 要记住的 | 真相（都实测过） |
+|---|---|
+| **数据设置（头号坑）** | 每个数据集列格都带 `<RG>`：**`--mode list`(默认)=原样展开 / `group`=相同值合并 / `summary`=按组聚合**。**不写 `<RG>` 服务端按「分组」处理**（去重、静默改数）→ 见 §6.15 |
+| 扩展方向 | **`dir="0"` = 纵向、`dir="1"` = 横向**（写反不报错，只是表格长歪）→ `--expand v/h`；`--expand none` 时多值会被**逗号拼成一格** |
+| 参数两套写法 | **数据集 SQL 只认 `${x}`；单元格公式只认 `$x`**；写错都不报错（`${x}` 会原样渲染出这 6 个字符） |
+| 参数默认值 | **数据集 `<Parameters>` 与模板参数声明两处都要写**；没默认值时用户不带参数打开就是空白（导出照成功）→ CLI 给 warning |
+| 验收 | **「导出成功」几乎没有验收价值**：列名/公式/样式索引写错，服务端一律照收、导出合法 xlsx（内容是空）→ 必须 openpyxl 逐格读回 |
+| 本地已拦 | `dsName` 不存在、公式 `=1+`/括号不配对、`--style` 越界、数据集名空、残缺 XML（上传前良构校验）、**`--fn` 配非 summary / `--group-by` 配非 summary / 对值单元格设数据设置**；列名无法离线核对 → 出 note 提示 |
+| 数字格式 | `<Style>` 里的 `<Format class="com.fr.base.CoreDecimalFormat"><![CDATA[#,##0]]>`；`report style --add --num-format` 或 `report cell --num-format` 一步生成 |
+| 行列尺寸 | 列宽值 ÷ 280800 = 导出列宽（字符）；行高值 ÷ 44200 ≈ 行高（磅）；`FRFont size` 单位 **1/8 磅**（72=9磅） |
+| 对齐码 | `horizontal_alignment`：**0=居中 / 2=左 / 4=右**（奇数被忽略，和直觉相反） |
+
+```bash
+export FRCLI_WRITE_SCOPE="demo_group/demo_user/临时"
+R="demo_group/demo_user/临时/demo.cpt"
+frcli report new "$R" --apply                       # 空白模板（2050B，自带可渲染骨架）
+frcli report dataset "$R" --add ds1 --conn demo_conn \
+    --sql "select 'A' code,1 cnt union all select 'B',2" --param topn=10 --apply
+frcli report table "$R" --dataset ds1 --at A2 --columns code,cnt --header --apply
+frcli report cell "$R" --at A1 --set-formula '="TOP" + $topn' --merge A1:C1 --apply
+frcli report cell "$R" --list -f table              # 只读核对结构（含 ds_mode/ds_fn）
+FRCLI_TIMEOUT=300 frcli export excel "$R" -o /tmp/demo.xlsx   # 再逐格读回才算验收
+```
+
+想按组出汇总（`地区/销售员/销量`）：
+
+```bash
+frcli report table "$R" --dataset ds1 --at A2 --columns 地区,销售员,销量 \
+    --mode summary --group-by 地区,销售员 --fn sum --header --apply
+# → 地区/销售员 = 分组（相同值合并），销量 = 汇总（自动 <Expand/>，不再按行扩展）
+frcli report cell "$R" --at D2 --set-ds-mode list --apply      # 改已有格的数据设置
+```
+
+`report table` 会**整格改写**目标区域 —— 要留标题行就 `--at A2`（先写表再写 A1 会把表头盖掉）。
+骨架也可以从现成模板裁：`report new "$R" --from <某张现成模板.cpt> --apply`（保留版面/样式表，清空内容）。
+
+### 6.15 ⚠️ 缺 `<RG>` 的单元格 = 服务端按「分组」处理（会静默去重，合计对不上）
+
+**这是我们的 bug，不是平台问题（2026-09 实测闭环）。**
+
+**早期两条结论都已撤回**：① "xlsx 的聚合/合计值会静默出错" —— 不存在，实测 26 个变体 × 3 轮
+**xlsx 与 csv 逐格全等，从无分歧**；② "同一模板不同时段导出 `4567.7 → 2345.6 → 4567.7`" ——
+那是**读错行**（合计行渲染在数据之后的第 6 行，当时按模板坐标读了第 4 行）。
+
+**真因**：`com.fr.report.cell.cellattr.core.group.DSColumn.getGrouper()` 在 `<RG>` 缺失时惰性返回
+`new FunctionGrouper()`，而其 `divideMode` 初值 `0` = **分组** ⇒ 单元格被当作「分组」：
+相同值合并、**数值列被去重**。明细 `10,10,20,10,30,30` 求和 = **110**（SQL 真值），
+缺 `<RG>` 时塌缩成 `10,20,10,30`、合计 = **70** —— **3/3 轮稳定复现的静默算错**。
+
+对照实验（同一数据集 `('A',10)('A',10)('A',20)('B',10)('B',30)('B',30)`，**只改 `<RG>`**，
+`demo_group/demo_user/skill测试/dsmode/`）：
+
+| 形态 | xlsx 逐格读回 |
+|---|---|
+| **无 `<RG>`** | `A/10, ''/20, B/10, ''/30`（4 行） |
+| `<RG class="…FunctionGrouper"/>`（分组＝缺省） | **与"无 `<RG>`"逐格相同** ← 根因的直接证据 |
+| `<RG class="…FunctionGrouper"><Attr divideMode="1"/></RG>`（列表） | 6 行全展开 |
+| `<RG class="…SummaryGrouper"><FN>…SumFunction</FN></RG>`（汇总） | `A/40, B/70`（按组聚合） |
+
+- 对策：① 写模板时 `<RG>` **必须显式写** —— `report table` 已改为默认 `--mode list`；
+  ② 有默认值的字段，"标签不在"**不等于**"设置没有"，默认值未必是你要的那个；
+  ③ **含合计/聚合的报表仍建议 xlsx × csv 双通道对**（通用戒律，与归因无关）；
+  ④ 更稳的是把合计交给 `--mode summary` 或 SQL（`union all select '合计', sum(...)`）
+- **复杂效果（分组小计/交叉表/条件属性/多数据集/参数联动/日期维度/公式实战）**：
+  见 **`references/cpt-patterns.md`** —— 8 类配方，每条都有「XML 片段 + 等价 CLI + 逐格实测 + 坑」。
+  三个最容易静默错的：① 同行的 `C3` 只是本行，整列合计要写 `C3[!0]`；
+  ② 交叉表的**值格必须与列维度同列**，否则列维度消失、值被逗号拼成 `100,200`；
+  ③ 条件属性里 `fg=` 与 `bold` 写同一条规则时字色会被 `FRFont` 覆盖（CLI 已自动并入）。
+- 完整模型与语料普查见 `references/cpt-features.md` 与 `docs/探索/cpt服务端模型-逆向.md`；
+  创作侧写法见 `references/cpt-authoring.md` §4.7 / §6.1
+
+
+### 6.18 第二辑（图表/控件/钻取/分页）的验收通道与静默错
+
+⚠ **判成败别只看管道后的 stdout**：**错误 JSON 走 stderr、成功走 stdout**，所以 `frcli … | jq` 会把错误吞掉（验证者本轮中过一次招）。要判成败看 **exit code**，或把 stderr 一起收（`2>&1`）。
+
+**验收通道别用错**（用错通道 = 假阴性）：
+行内数据 → **xlsx 逐格读回**；**图表** → `report image` 或 `export pdf` 出图看（**xlsx 里是嵌入图片
+`xl/media/image1.png`，逐格读回永远是 0 个非空格**）；**页眉页脚/页码/重复标题行/分页** →
+**`export pdf` + pdfium 出图看**（`report image` 不渲染分页结果）；**冻结** → 导出态本来就无差异，
+只验 XML 往返 + 预览页。
+
+| 静默错 | 真相 | 正确做法 |
+|---|---|---|
+| 图表分类列名写错 | `status: ok`、导出正常，**图照画但完全错**（无分类标签、各系列塌成一根柱、Y 轴刻度也变） | 列名必须逐格核对；`report chart --list` 能读回绑定 |
+| 参数控件名 ≠ 参数名（含大小写） | 控件存在、`--list` 显示它，**不报错**；但**联动与否导出通道验不了**（控件名正确时默认导出同样是模板默认值） | 控件名必须与模板参数/SQL 里 `${同名}` 一致；**联动只能在预览页点一下验** |
+| 超链接写成 `<HighlightList><Highlight><HighlightAction class="…HyperlinkHighlightAction">`（无 `<Condition>`） | **整张模板渲染成平台出错页**（xlsx/pdf 都是 3430B 出错页、**没有 detail-message**） | 用单元格级 `<NameJavaScriptGroup>`（`report link` 生成的就是它，语料 260 处都这样） |
+| `<Footer>` 放错父节点（`<Report>` 下而不是 `<ReportAttrSet>` 内）/ `footerHeight="0"` | 导出正常、页脚**不出现**，不报错 | `<Header>/<Footer>` 与 `<ReportSettings>` 同级；高度必须 >0（CLI 会自动补 20 磅并提示） |
+| 用 `report image` 验页脚/重复标题行 | 假阴性（image 是版面流） | 走 PDF + pdfium；重复标题行还要**先把表头加高**再比页数（矮表头只差 258B） |
+
+其它硬事实：`SORT(C3)` 是**降序**（FR 英文/繁体帮助写升序是错的，实测 4/3/2/1）；`MOM/PROPORTION`
+是语法糖（`MOM(A,B) ≡ IF(&A>1, B/B[A:-1], 0)`）；`!0` 是一个词法记号；**超链接在导出产物里什么都不留**
+（xlsx 无 `<hyperlink>`、pdf 无 `/URI`）。
+
+### 6.16 复杂报表的四个「静默错」（0.8.0 实测，逐格证据见 `references/cpt-patterns.md`）
+
+| 现象 | 真相 | 正确做法 |
+|---|---|---|
+| 占比列每行都是 100% | 同一行里的 `C3` 只是**本行那一格**，`=C3/SUM(C3)` 分子分母相同 | 整列合计写 **`SUM(C3[!0])`**（`[!0]` = 该格扩展出的全部格子） |
+| 交叉表值列变成 `100,200` 一串 | **值格没和列维度同列**（列维度就消失了，值只剩行父格） | 值格写在**表头行列维度那一列**的数据行；用 `report crosstab` 生成即可 |
+| 条件属性的字色不生效 | `FRFontHighlightAction` 写的是**整个 FRFont**，会覆盖同一条规则里的 `ForegroundHighlightAction` | `fg=` 别和 `bold/size/font` 同规则手写；CLI 已自动把字色并进 `<FRFont foreground=…>` |
+| `=SUM(SLICEARRAY(B3[!0],1,SEQ()))` 每行都得整列合计 | `SEQ()` 直接写进公式里不按行求值 | 先用一格写 `=SEQ()`，累计写 **`=SUM(SLICEARRAY(B3[!0],1,D3))`** |
+
+配套两条：
+- **不存在的函数会让整张模板渲染不出来**（`ACCSUM`/`COUNTD`/`DATEFORMAT`/`DATETRUNC` 都不存在；
+  `RANK` 存在但求值失败 → 渲染 `#NAME?`）。**组内排名请写在 SQL 里**。
+  排查入口：`frcli report datasets <模板>` 会直接报 `no function found: X`（数据集坏 vs 渲染坏的分界线）。
+- **条件属性隐藏整行** = `--rule 'v<100:rowheight=0'`（服务端 `RowHeight` 行高 0），
+  导出 xlsx 里那一行**整行消失**（不是行高变 0），抄官方 `doc/Primary/DetailReport/条件属性实现折叠树.cpt`。
+
+### 6.17 分页/重复标题行的实测边界（别照直觉写文档）
+
+- `report page` 能写**页眉页脚高度**（`ReportSettings headerHeight/footerHeight`，FU 单位）与**冻结列**
+  （`<FrozenColumnRow columnrow="列,行"/>`）；PDF 产物确实随之变化（43874B vs 41762B），
+  但**文本坐标逐项相同** ⇒ "冻结列每页重复"**未确证**；`report image` 通道**完全忽略**这两项（两次出图逐字节相同）。
+- **"每页重复标题行"在本版本没找到生效写法**：1602 个官方 .cpt 里 `repeat*` 属性 0 处；
+  80 行报表实测默认**不重复**表头，加 `CellPageAttr repeat="false"` 后产物逐字节相同
+  ⇒ `repeat` 不是这个开关。要重复表头，现实路线是把表头做进 `<Header>`（**未确证**，CLI 只读该节点）。
+- `CellPageAttr` 的 `repeat` **缺省是 true**（服务端字段初值 63 全位，`writeXML` 只在 false 时写属性）——
+  "标签不在 ≠ 设置没有"的又一例；但上面实测说明它不影响分页重复行为。
+
+
 ## 7. 故障排查
 
 | 现象 | 处理 |
 |------|------|
 | `frcli: command not found` | 按 `references/install.md` 自举：`python <base>/references/run.py <命令>` 或 `cd <base>/src && python -m frcli <命令>`（零安装） |
+| `导出产物魔数不符` / `导出被服务端排队` | 服务端返回的是出错页或 `Dec-Waiting_In_Line` 排队页；重试一次通常即成功，批量要降并发（§6.1） |
+| `读取报表数据集 xxx失败: 错误代码:11300001 数据集 [y] 配置错误…` | 该模板里有坏数据集，平台原文已给出**坏数据集名 + SQL 报错**；这是报表本身的问题，不是 CLI 故障（§6.5） |
 | 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，解码页面里的 `detail-message` 定位坏数据集（§6.1） |
 | `导出请求失败: The read operation timed out` | 设 `FRCLI_TIMEOUT=300`（批量 600）重跑（§6.2） |
 | `schedule list` / `report list` 返回 `[]` | 认证失效（可能未过期）：0.1.1 起自动重登一次；仍为空则手动 `rm -f ~/.frcli/tokens/*.json`（§6.4） |
@@ -402,7 +701,10 @@ frcli schedule create new.yaml
 | `实例 'x' 不存在` | `frcli server list` 看可用实例；配置搜索顺序：`$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml` |
 | 登录时卡住不动 | `server add` 没带 `-p`，改为带密码重建实例 |
 | `report datasets` 返回 `[]` | 该报表数据集在服务端报错，报表本身是坏的（§6.5） |
-| `'FineReportClient' object has no attribute 'upload_report'` | `report upload/delete` 未实现；**服务器也没有写模板内容的 REST 接口**（§6.7），改模板走 Designer |
+| `本地内容不像 cpt 模板（前 600 字节没有 <WorkBook>）` | 你手里的文件来自 `format=cpt`（旧 `report download`）而不是模板本体；重新用 `report download` 取，别加 `--allow-format` 硬写（§6.7） |
+| `download 报「不在账号的远程设计授权目录内」` | 新 `report download` 走远程设计通道，需要该路径的远程设计授权；服务端对无授权路径返回 **0 字节**而不是报错（§6.7） |
+| `Upload 后回读不一致` | 该路径不在账号的远程设计授权目录内，服务端**静默跳过写入**；找管理员加授权，或换有权限的目录（§6.7） |
+| `TplLockedException` / 写模板报锁 | 模板正被别的 Designer 打开（占锁中）；让对方关掉或等锁过期（§6.7） |
 | `任务不存在: xxx` | `schedule get/run/update` 用准确任务名（先 `schedule list`） |
 | `schedule delete` 删不掉 | 传 UUID `id` 而非任务名（§6.6）；0.4.2 起会按裸数组删并校验，旧版报 `deleted: true` 也可能是假成功 |
 | `schedule create` 报 `detached entity passed to persist: ScheduleOutputEntity` | YAML 沿用了源任务的 `scheduleOutput.id`/输出 action id，换成新 UUID（§6.11） |

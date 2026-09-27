@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1"/>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta name="author" content="FineReport"/>
+    <meta name="Copyright" content="FineReport"/>
+    <meta name="description" content="FineReport--Web Reporting Tool"/>
+    <meta name="keywords" content="FineReport,Web Reporting Tool"/>
+    <title>出错页面</title>
+    <link rel="stylesheet" type="text/css"
+          href="/webroot/decision/view/report?op=resource&resource=/com/fr/web/core/css/error.css">
+</head>
+
+<body>
+    <div id="wrapper">
+        <div>
+            <div>
+                <div id="header">
+                    <img id="header-content"
+                         src="/webroot/decision/view/report?op=resource&resource=/com/fr/web/images/error/error-with-solution-bg.png">
+                </div>
+                <div id="tip">
+                    <div id="tip-oops">Oops!!!</div>
+                    <div id="tip-detail">非常抱歉，出错啦。</div>
+                </div>
+            </div>
+            <div id="detail">
+                <div id='detail-message'>
+                    <p></p>
+                </div>
+
+                <div id="exception-tab" class="tab tab-unselected">详细信息</div>
+                <div id="solution-tab" class="tab tab-selected">解决方案</div>
+                <div id="exception" class="tab-content" style="display: none">
+                    <pre>java.lang.NullPointerException&#10;&#9;at com.fr.report.cell.cellattr.highlight.AbstractHighlight.eval&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.cell.cellattr.highlight.HighlightGroup.execute&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.molxJwixYazbdbacpDpnuq&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.molxJwixYqiymhflj&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.molxJwixTggxdpfmm&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.brcuayiewam_kkpreaq_db_lnt_eosskk&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.molxJwixJxjjnq&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW&#36;_A.cyCqcgkn&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW.execute4ECReport&#40;Unknown Source&#41;&#10;&#9;at com.fr.report.core.lkd.BW.execute&#40;Unknown Source&#41;&#10;</pre>
+                </div>
+                <div id="solution" class="tab-content" style="display: block">
+                    <pre>抱歉！暂无解决方案建议。</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="text/javascript">
+        document.getElementById("exception-tab").onclick = function(){
+            document.getElementById("exception-tab").className = "tab tab-selected";
+            document.getElementById("solution-tab").className = "tab tab-unselected";
+            document.getElementById("exception").style.display = "block";
+            document.getElementById("solution").style.display = "none";
+        };
+
+        document.getElementById("solution-tab").onclick = function(){
+            document.getElementById("exception-tab").className = "tab tab-unselected";
+            document.getElementById("solution-tab").className = "tab tab-selected";
+            document.getElementById("exception").style.display = "none";
+            document.getElementById("solution").style.display = "block";
+        };
+    </script>
+</body>
+
+</html>

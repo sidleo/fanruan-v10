@@ -35,9 +35,13 @@ fanruan_v10/
 │   ├── auth.py           # TokenManager：登录、token 缓存、cookies 保留
 │   ├── config.py         # 多实例配置（~/.frcli/config.yaml）
 │   ├── output.py         # JSON / table 输出、成功与错误封装
+│   ├── remotedesign.py   # 远程设计通道：服务端模板读写（report upload/delete 的后端）
+│   ├── jser.py           # 手写 Java 对象序列化（远程设计 RPC 载荷/应答编解码）
+│   ├── rdcrypto.py       # 纯 Python AES-ECB / SM4-ECB（握手密码加密，零依赖）
 │   └── commands/         # server / report / export / attach / system / entry / user / schedule
 ├── references/
 │   ├── install.md        # 自检 + 自举手册
+│   ├── remotedesign.md   # 远程设计 RPC 协议说明 + 用 Designer jar 复核报文的脚本
 │   ├── run.py            # 跨平台启动器（自举 + 软链自愈 + 版本提示）
 │   ├── run.sh            # Unix 便捷入口
 │   └── frcli             # 软链 shim
@@ -77,8 +81,12 @@ fanruan_v10/
 | 用户 / 组织 | `POST /decision/v10/users`（GET 版本服务端报错）、`/decision/v10/user/account`、`/departments`、`/posts` | POST / GET |
 | 服务器数据集 | `/decision/v10/serverdatasets`、`/decision/v10/{ds}/datasetcolumns` | GET |
 | 调度增强 | `/decision/v10/schedule/task/list/{pt}?page=&count=`、`/task/{name}/exists`、`/executing`、`/record/list?page=&perPage=`、`/setting` | GET |
+| 远程设计握手 | `/decision/remote/design/check` | POST（返回 frontSeed/frontSM4Key/transmissionEncryption） |
+| 远程设计取 token | `/decision/remote/design/verify` | POST 表单 `username` + **加密后**的 `password` |
+| 远程设计 RPC（写模板） | `/decision/remote/design/channel` | POST，body = gzip + Java 序列化的 Invocation |
+| 远程设计服务清单 | `/decision/remote/design/service` | POST 表单 `username`+`password` |
 
-不可用：`report upload` / `report delete`（服务器不支持 Web API 改模板）；`dataset preview`（需管理员权限）；
+不可用：`dataset preview`（需管理员权限）；
 `POST /v10/schedule/task/log/search`（服务端 ClassCastException，该版本坏）。
 登录/配置类 `/decision/login/*` **不带 `v10` 前缀**。
 
@@ -103,6 +111,11 @@ fanruan_v10/
   `schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *`。
   导出会真实触发服务端计算，批量导出 / `schedule run|delete` 必须先向用户确认。
   `attach upload` 属**服务端写**（落附件缓存），只在用户明确授权的对象上测，测完必须 `attach remove` 清理。
+  `report upload` / `report delete` / `report edit --apply` 直接改**生产模板文件**（影响所有看这张报表的人），
+  同样只在用户明确授权的对象上测；验证用**新建临时文件 → 回读比对 → 删除**，绝不拿现有模板做实验。
+  **写范围 0.6.0 起默认拒绝**：没设 `FRCLI_WRITE_SCOPE` 就必须 `--any-path` 才写（沉默 ≠ 不限制）。
+  2026-09 事故：agent 在没设范围的 shell 里跑 `report edit --apply`，写出了团队目录
+  （`demo_group/other_user/legacy_rpt.cpt`），靠 `upload_template` 的自动备份才逐字节还原。
 - **不写入任何账号、密码、token、连接信息**到本目录（配置在 `~/.frcli/`，属机器本地状态，不进仓库）。
 - **新增危险操作**：在 `SKILL.md`「安全约束」标 🔴，并要求执行前向用户确认。
 - **不要顺手改无关代码**：只动与本次需求相关的文件。
@@ -112,7 +125,10 @@ fanruan_v10/
 ### 导出「成功」可能是 HTML 出错页面
 
 `export` 只看 HTTP 状态码；FineReport 出错时返回 **200 + HTML 出错页面**，CLI 照写文件并报 `status: ok`。
-判据：xlsx/docx = `PK\x03\x04`、pdf = `%PDF`、png = `\x89PNG`；失败文件含 `<title>出错页面</title>` / `Oops!!!`。
+判据：xlsx = `PK\x03\x04`、pdf = `%PDF`、png = `\x89PNG`、**word 是 RTF（`{\rtf1`，不是 docx 的 PK）**；
+失败形态有**两种**且都不带 title：出错页（含 `出错页面` / `Oops!!!` / `detail-message`）与
+**排队页**（`Dec-Waiting_In_Line`，约 2KB，重试一次即成功）。`export` 0.6.0 起内置魔数校验。
+出错页的 `detail-message` 属性有单引号/双引号两种写法，解析要都认。
 页面 `detail-message`（HTML 实体编码）里有具体错误代码与原始 SQL，解码即可定位坏数据集。
 
 ### 出错页 `detail-message` 是通用诊断/挖接口入口（**不限导出**）
@@ -168,19 +184,88 @@ fanruan_v10/
 
 `report datasets/info/download` 走 `format=cpt` 取模板定义，服务端会校验数据集。数据集配置错误时返回 0 条 / `无法读取报表定义` —— 不是 CLI 故障，而是这张报表当前就是坏的（导出也必然拿到出错页面）。
 
-### 改模板内容：REST 没有通道（2026-09 实测，别再重复调研）
+### 改模板内容 = 远程设计通道（0.5.0 起已实现；REST 确实没通道，但别再只盯着 REST）
 
-- `TemplateBean` / `FileBean` 只有元数据字段（id/pId/text/path/description/showType/parameters…），**无内容字段**；
-  `ReportEntryService.addTemplates()` 只写条目记录，无落盘调用；569 条路由里没有任何接口接收 .cpt 字节。
+- **REST 侧确实没有写模板内容的接口**：`TemplateBean` / `FileBean` 只有元数据字段（id/pId/text/path/description/showType/parameters…），
+  `ReportEntryService.addTemplates()` 只写条目记录，569 条路由里没有任何接口接收 .cpt 字节。
 - 两棵树要分清：**报表目录树**（`/v10/templates/all`，id = 文件路径）vs **平台条目树**（`/v10/entries`，id = UUID）。
   目录管理类写接口（`PUT /v10/template/{id}`、`POST /v10/{directoryId}/templates`、`PUT /v10/file/{id}`、
   `POST /v10/{pId}/directory`、`PUT /v10/entry(s)`、`POST /v10/dataset/upload`、`POST /v10/data/transference/import`）
   对普通分析账号一律 `Fine-Dec_No_Privilege_Access_Page`；路径型 id 还额外 400/405（无法作为单段路径参数路由）。
-- Designer 存模板走 `/decision/remote/design/service`（28 个内部 RPC：`TplOperator`/`CommitHelper`/`EditLockOperator`/
-  `EncryptOperator`…），载荷 **SM4 加密**（`/remote/design/check` → `transmissionEncryption:2` + `frontSM4Key`/`frontSeed`）
-  → 抓包也是密文，不建议复刻。
-- **唯一可用的服务端写操作 = 附件**（`POST /v10/attach/upload`，multipart 字段名 `file`；`DELETE /v10/attach/remove/{id}`）。
-  它只落附件缓存，**没有任何接口把 attachId 绑成模板**，所以改不了模板内容。
+- **可用的写法是 Designer 的「远程设计」通道**：`/decision/remote/design/{check,verify,channel,service}`。
+  `/channel` 是通用反射 RPC 网关（给类名+方法名+参数类型即执行），`WorkResource` 就是服务端 `WEB-INF` 远程文件系统，
+  足以读写 .cpt。载荷 = `gzip(Java 对象流)`，**只有密码字段加密**（AES/SM4，`/check` 返回参数），RPC 载荷不加密。
+  Python 复刻在 `src/frcli/{jser,rdcrypto,remotedesign}.py`，与帆软原件逐字节一致（`tests/test_remotedesign.py`）。
+- **权限**：路径含 `reportlets` 时查账号的远程设计授权目录，不含则不校验；**无权限时 `write` 静默不写也不报错** →
+  写后必须回读校验（`report upload` 已内置 SHA256 比对）。覆盖前 `readAndLockFile` 占锁，被他人占用则拒绝写。
+- 附件（`POST /v10/attach/upload`）仍只是附件缓存，**没有任何接口把 attachId 绑成模板**，与改模板无关。
+
+### `format=cpt` 不是模板文件字节（拿它回传会毁模板）
+
+`GET /decision/view/report?reportlet=X&format=cpt` 返回的是**另一种序列化**：根元素 `<TableDataMap>`，
+缺 `<WorkBook>`/`<StyleList>`；同一模板实测 通道 4510B vs format=cpt 6362B，SHA256 不同。
+`report download` 0.5.1 起改走远程设计通道（与 upload 同源）；`report upload` 默认断言前 600 字节
+含 `<WorkBook>`，否则拒绝（`--allow-format` 才放行）。数据集定义用 `report datasets`。
+反面教材：照旧文档做 `download → 改 → upload --force`，会把 stub 写回生产模板，且回读校验通过（假阳性）。
+
+### 改 XML 做实验：**替换/注入必须断言成功**，否则得到假结论
+
+做"改一个字段看效果"的对照实验时，`str.replace` / 正则**不匹配就静默什么都不做**，
+于是你比较的是两份**完全相同**的文件，却会得出"这个字段没用"的结论。本项目真实发生过两次：
+① 删配方空操作时正则删多了建表行；② 注入 `<HR F="T"/>` 时正则没匹配上（`<HR/>` 与 `<HR />` 空白不同），
+得到"6 页、第 2 页无表头"，差点推翻一个**已经验对**的结论。
+
+**规矩**：用 `re.subn` 并断言 `n == 1`；改完**从服务端回读**确认目标串在；
+对照实验要**先证明两份输入真的不同**（比 SHA256 或比关键片段），再比输出。
+
+同类：**"没生效"要先排除自己的表达式/阈值写错**（我们踩过：标红阈值 `v>0.2` 高于数据最大值；
+标题用 `${sdate}` 而非 `$sdate`；SQL 缺 `from`；列名写错）。
+
+### 写命令的"无改动"必须幂等（别用 exit 1 表达"什么都没改"）
+
+写命令（`report cell/dataset/table/...`）在目标已是请求状态时，返回 `status: ok` + `changed: false`
++ `note`，**不报错也不发写请求**。2026-09 由独立验证者发现：原先抛 `ApiError` 会 exit 1，
+而配方集 §1 里恰好有两步是这种空操作 → **任何 `set -e` 的复现脚本都会在中途断掉**，
+且文档声称"逐条真跑过"与实际不符。判据：确认改没改看 `changed` 字段。
+
+配套：`--num-format/--bold/--bg` 这类"造样式"的选项先**复用等价样式**（归一化 XML 比对），
+否则反复跑会让 `<StyleList>` 无限膨胀（修复前实测 5→6→7→8），幂等性也无从谈起。
+
+### 缺 `<RG>` 的单元格 = 服务端按「分组」处理（会静默去重，合计对不上）
+
+**早期误判（已撤回）**：最初记成"xlsx 合计 = 某一行值（错）而 csv 对"，还记过"同一模板不同时段导出
+`4567.7 → 2345.6 → 4567.7`"。**两件都是读法错误** —— 合计行渲染在数据之后的第 6 行，而当时按**模板坐标**读了
+第 4 行（那是第 2 条明细）。实测 26 个变体 × 3 轮：**xlsx 与 csv 逐格全等，从无分歧**，与导出格式无关。
+
+**真因（2026-09 实测闭环，不是平台 bug）**：`DSColumn.getGrouper()` 在 `<RG>` 缺失时惰性返回
+`new FunctionGrouper()`（`divideMode` 初值 0 = 分组）⇒ **单元格被当作「分组」**，相同值合并、数值列被去重。
+对照实验（同数据集 `('A',10)('A',10)('A',20)('B',10)('B',30)('B',30)`，只改 `<RG>`）：
+
+| 形态 | 结果 |
+|---|---|
+| 无 `<RG>` | `A/10, ''/20, B/10, ''/30`（4 行） |
+| `<RG class="…FunctionGrouper"/>`（分组，缺省） | **与"无 `<RG>`" 逐格相同** ← 根因的直接证据 |
+| `<RG class="…FunctionGrouper"><Attr divideMode="1"/></RG>`（列表） | 6 行全展开 |
+| `<RG class="…SummaryGrouper"><FN>…SumFunction</FN></RG>`（汇总） | `A/40, B/70`（按组聚合） |
+
+**真正的问题形态是"静默算错"，不是"时对时错"**：缺 `<RG>` 时合计 = **70**，而 SQL 真值 = **110**
+（`10+10+20+10+30+30`）——因为分组去重把 `A` 的 `10,10` 与 `B` 的 `30,30` 塌缩了。**3/3 轮稳定复现**。
+
+**规矩**：写 .cpt 时 `<RG>` **必须显式写**（`report table` 默认已改为 `--mode list`）；
+凡是有默认值的字段，默认值未必是你要的那个 —— **"标签在不在"不等于"设置有没有"**。
+完整模型见 `docs/探索/cpt服务端模型-逆向.md`。
+
+### 导出产物逐格 diff 有浮点抖动（别期望全等）
+
+同一张模板、同样参数，**前后两次导出**用 openpyxl 逐格比对，会有上百个数字格"不同"——
+但最大相对误差只有 **4.5e-12**（服务端聚合/舍入的抖动），没有一处超过 1e-6。
+所以「改了一格，验证只有那一格变了」**不能直接全等比较**，否则被假阳性淹没。正确判据：
+
+1. 按单元格类型分离（字符串格 / 数字格）
+2. 字符串格可以全等比；数字格给容差（1e-9 足够）
+3. 版面用 `dims` + 非空格数比，不要比逐格样式对象
+
+这条是 `format=cpt` 字节不稳定（下面那条）在**导出值**上的版本，来源见 `docs/验证/cpt创作验证报告.md`。
 
 ### `format=cpt` 响应字节不稳定（别用整体 hash 判断模板是否被改）
 

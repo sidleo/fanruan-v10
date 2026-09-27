@@ -17,6 +17,16 @@ CONFIG_SEARCH_PATHS = [
 CONFIG_DIR = Path.home() / ".frcli"
 DEFAULT_CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
+#: `frcli -i <实例> ...`（顶层选项）与 `FRCLI_INSTANCE` 落到这里，
+#: 子命令没显式传 `-i` 时作为默认实例。曾经顶层 `-i` 只写进 ctx.obj 没人读，
+#: 于是 `frcli -i dev report list` 静默跑在默认（可能是生产）实例上。
+CLI_INSTANCE: Optional[str] = None
+
+
+def set_cli_instance(name: Optional[str]):
+    global CLI_INSTANCE
+    CLI_INSTANCE = name or None
+
 
 def _find_config_file() -> Optional[Path]:
     """查找配置文件"""
@@ -45,7 +55,7 @@ def load_config(name: str = None) -> ServerConfig:
         raise ConfigError("未配置任何 FineReport 实例。使用 `frcli server add` 添加实例。")
 
     if name is None:
-        name = config.get("default")
+        name = CLI_INSTANCE or os.environ.get("FRCLI_INSTANCE") or config.get("default")
         if not name:
             name = next(iter(instances))
         if name not in instances:

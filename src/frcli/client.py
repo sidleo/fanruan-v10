@@ -51,13 +51,56 @@ def _is_auth_failure(resp: httpx.Response) -> bool:
     return False
 
 
-_HTML_ERROR_MSG = re.compile(r'id="(detail-message|simple-message)"[^>]*>(.*?)</div>', re.S)
+_HTML_ERROR_MSG = re.compile(
+    r"""id=["'](detail-message|simple-message)["'][^>]*>(.*?)</div>""", re.S)
 
 # 平台出错页里的本地化 key，翻成人话（detail-message 为空时只剩它们）
 _LOCALE_TEXT = {
     "Fine-Dec_No_Privilege_Access_Page": "当前账号无此接口权限（该接口需管理员）",
     "Fine-Dec_Default_Error_Tip": "平台返回错误页（无详细信息，通常是对象不存在）",
 }
+
+
+#: 导出产物的魔数（用于把"200 + 出错页/排队页"挡在交付之前）。
+#: ⚠️ word 目标是 RTF（`{\\rtf1`），不是 docx 的 PK —— 实测帆软 `format=word` 出 RTF，
+#: 按 docx 的 PK 去校验会把好文件判成坏文件。
+EXPORT_MAGIC = {
+    "excel": (b"PK\x03\x04", "xlsx/docx(zip)"),
+    "pdf": (b"%PDF", "pdf"),
+    "image": (b"\x89PNG", "png"),
+    "word": (b"{\\rtf1", "rtf"),
+}
+
+
+def _looks_like_html(resp) -> bool:
+    """响应是不是平台的 HTML 页面（出错页），而不是正常的 XML/JSON 数据。"""
+    ctype = resp.headers.get("content-type", "").lower()
+    if "html" in ctype:
+        return True
+    head = resp.text.lstrip()[:64].lower()
+    return head.startswith("<!doctype") or head.startswith("<html")
+
+
+def assert_export_magic(path, fr_format: str):
+    """导出产物必须对得上魔数，否则抛错（绝不把 HTML 出错页/排队页当报表交付）。
+
+    csv/text 没有魔数可比，退化为"像不像 HTML 页面"判定 —— 实测 `export csv` 撞上
+    `<RG>` 类名不存在这类错误时，**会把出错页原样写成 .csv**，肉眼像一份空报表。
+    """
+    head = path.read_bytes()[:512]
+    if "出错页面".encode("utf-8") in head or b"Oops!!!" in head:
+        raise ExportError(f"导出产物是平台出错页，不是报表: {path}")
+    if fr_format in ("text", "csv"):
+        stripped = head.lstrip().lower()
+        if stripped.startswith(b"<!doctype") or stripped.startswith(b"<html") \
+                or b"dec-waiting_in_line" in stripped:
+            raise ExportError(f"导出产物是 HTML 页面（出错页/排队页），不是报表数据: {path}")
+        return
+    want = EXPORT_MAGIC.get(fr_format)
+    if want and not head.startswith(want[0]) and want[0] not in head[:8]:
+        raise ExportError(
+            f"导出产物魔数不符（期望 {want[1]}）: {path}，头部={head[:24]!r}。"
+            "常见原因：服务端返回出错页/排队页，或该格式的实际封装与预期不同")
 
 
 def _unwrap_json(resp: httpx.Response, what: str) -> Any:
@@ -189,18 +232,38 @@ class FineReportClient:
             request_params.update(params)
 
         export_url = f"{self.config.workspace}/decision/view/report"
+        # 走 _request：认证失效（本平台是 302 → CAS，不是 401）时自动重登并重试一次。
+        # 直接 self._http.get 会跳过这层，表现为"导出失败: HTTP 302"，看着极像"模板坏了"
+        # —— 实测批量导出跑一半时踩到过，5 个变体因此假阴性。
         try:
-            resp = self._http.get(export_url, params=request_params)
+            resp = self._request("GET", export_url, params=request_params)
         except httpx.RequestError as e:
             raise ConnectionError(f"导出请求失败: {e}")
 
         if resp.status_code != 200:
             raise ExportError(f"导出失败: HTTP {resp.status_code}")
 
+        # 平台在并发/限流时返回「排队中」页面而不是报表：200 + 2KB 左右 HTML，
+        # 没有 <title>出错页面</title> 也没有 detail-message，只看状态码会当成功。
+        if b"Dec-Waiting_In_Line" in resp.content or b"Waiting_In_Line" in resp.content:
+            raise ExportError(
+                "导出被服务端排队（返回 Dec-Waiting_In_Line 排队页，不是报表）。"
+                "稍后重试一次通常即成功；批量导出请降低并发。")
+
         output_path = Path(output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "wb") as f:
+        with output_path.open("wb") as f:
             f.write(resp.content)
+        try:
+            assert_export_magic(output_path, fr_format)
+        except ExportError as e:
+            # 坏产物别留在原地冒充报表：改名保留（既是证据，也避免 agent 拿错文件）
+            bad = output_path.with_name(output_path.name + ".bad")
+            try:
+                output_path.replace(bad)
+            except OSError:
+                bad = output_path
+            raise ExportError(f"{e}；坏产物已改名保留在 {bad}") from e
         return str(output_path.resolve())
 
     # ========== 报表文件管理 ==========
@@ -248,23 +311,46 @@ class FineReportClient:
         if resp.status_code != 200:
             raise ReportNotFoundError(f"无法读取报表: {report_path}")
         content = resp.text
-        if "Oops" in content or "找不到数据连接" in content:
-            return {"path": report_path, "name": report_path.split("/")[-1], "error": "无法读取报表定义"}
+        if "json" not in resp.headers.get("content-type", "") and _looks_like_html(resp):
+            # 与 report datasets 一致：把平台原文（哪个数据集坏了、为什么）透出来，
+            # 而不是只回一句没用的"无法读取报表定义"。
+            _unwrap_json(resp, f"读取报表信息 {report_path}")
         info = {"path": report_path, "name": report_path.split("/")[-1], "datasets": [], "parameters": []}
         dataset_matches = re.findall(r'<TableData\s+name="([^"]+)"', content)
         info["datasets"] = [name.replace("&amp;", "&") for name in dataset_matches]
         param_matches = re.findall(r'<Attributes name="([^"]+)"/>', content)
         info["parameters"] = list(set(param_matches))
+        # 上面的正则只能扒到「数据集里声明过」的参数名；只在
+        # `ReportParameterAttr > Parameters` 里声明的模板参数它看不到（实测：恒为 []）。
+        # 官方 paras 接口才是权威口径，取到就并进来（取不到不影响 info 本身）。
+        try:
+            official = self.get_report_paras(report_path)
+            names = [p.get("name") for p in official
+                     if isinstance(p, dict) and p.get("name")]
+        except Exception:
+            names = []
+        if names:
+            info["parameters"] = sorted(set(info["parameters"]) | set(names))
+            info["parameters_from"] = "template/paras + 模板内 <Attributes>"
         return info
 
     def get_report_datasets(self, report_path: str) -> list[dict]:
-        """获取报表的数据集定义"""
+        """获取报表的数据集定义。
+
+        取不到定义时**必须报平台原文**：服务端只要有一个数据集坏掉，就整份 `format=cpt`
+        返回出错页（而不是缺那一条），静默化成空列表会让人误判成"这张报表没有数据集"。
+        出错页 `detail-message` 里通常直接写着坏数据集的名字与原因。
+        """
         self._ensure_auth()
         import re
         url = f"{self.config.workspace}/decision/view/report"
         resp = self._get(url, params={"reportlet": report_path.lstrip("/"), "format": "cpt"})
         if resp.status_code != 200:
             raise ReportNotFoundError(f"无法读取报表: {report_path}")
+        # 正常返回是 XML（模板定义）；只有拿到 HTML 页面才是出错页，这时把
+        # detail-message 原文抛出来（通常直接写着哪个数据集坏了、为什么）。
+        if _looks_like_html(resp):
+            _unwrap_json(resp, f"读取报表数据集 {report_path}")
         content = resp.text
         datasets = []
         tabledata_pattern = r'<TableData\s+name="([^"]+)"[^>]*>(.*?)</TableData>'
@@ -276,7 +362,15 @@ class FineReportClient:
             sql_match = re.search(r'<Query>.*?<!\[CDATA\[(.*?)\]\]>.*?</Query>', section, re.DOTALL)
             if sql_match:
                 sql = sql_match.group(1).strip()
-            datasets.append({"name": name, "parameters": params, "sql": sql})
+            # 连接名：只存在于模板 XML 的 <DatabaseName> 里（serverdatasets 列的是"服务器数据集"，
+            # 完全不含数据库连接名）。不暴露它，用户就没法知道该往 --conn 里填什么 ——
+            # 而填错的连接名**不会当场报错**，要等到查询期才失败。
+            conn = ""
+            conn_match = re.search(r'<DatabaseName>\s*<!\[CDATA\[(.*?)\]\]>\s*</DatabaseName>',
+                                   section, re.DOTALL)
+            if conn_match:
+                conn = conn_match.group(1).strip()
+            datasets.append({"name": name, "parameters": params, "sql": sql, "connection": conn})
         return datasets
 
     def get_report_paras(self, report_path: str) -> list[dict]:
@@ -291,20 +385,32 @@ class FineReportClient:
         return _unwrap_json(resp, "读取报表参数").get("data", [])
 
     def download_report(self, remote_path: str, local_path: str = None) -> str:
-        """下载报表模板"""
-        self._ensure_auth()
-        url = f"{self.config.workspace}/decision/view/report"
-        resp = self._get(url, params={"reportlet": remote_path.lstrip("/"), "format": "cpt"})
-        if resp.status_code != 200:
-            raise ReportNotFoundError(f"下载失败: {remote_path}")
-        if "Oops" in resp.text or "error" in resp.text.lower():
-            raise ReportNotFoundError(f"下载失败（无权限或文件不存在）: {remote_path}")
+        """下载模板**原始字节**（走远程设计通道 `WorkResource.readFully`）。
+
+        ⚠️ 不要改用 `GET /decision/view/report?format=cpt`：那个端点返回的是
+        **另一种序列化**（根元素 `<TableDataMap>`，缺 `<WorkBook>`/`<StyleList>`），
+        与服务器上的文件字节不同 —— 实测同一模板 通道 4510B vs format=cpt 6362B，
+        SHA256 不同。拿它回传会把模板写坏，而且回读校验还会通过（假阳性）。
+        数据集定义请用 `report datasets`。
+        """
+        from .remotedesign import RemoteDesignSession, normalize_report_path
+
+        remote = normalize_report_path(remote_path)
+        with RemoteDesignSession(self.config) as session:
+            session.check()
+            data = session.read(remote)
+        if not data:
+            raise ReportNotFoundError(
+                f"下载失败（服务端无此文件，或该路径不在账号的远程设计授权目录内）: {remote}")
+        if b"<WorkBook" not in data[:600]:
+            raise ReportNotFoundError(
+                f"取回的内容不是 cpt 模板（前 600 字节没有 <WorkBook>）: {remote}")
         if local_path is None:
             local_path = remote_path.split("/")[-1]
         output = Path(local_path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        with open(output, "wb") as f:
-            f.write(resp.content)
+        with output.open("wb") as f:
+            f.write(data)
         return str(output.resolve())
 
     # ========== 定时任务 ==========

@@ -76,8 +76,8 @@ def export_excel(report_path, output, params, instance):
 @click.option("--params", type=str, help='JSON 格式的报表参数')
 @click.option("-i", "--instance", help="FineReport 实例名")
 def export_word(report_path, output, params, instance):
-    """导出报表为 Word"""
-    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.docx"
+    """导出报表为 Word（⚠️ 服务端实际返回 RTF，产物落盘为 .rtf）"""
+    output = output or f"{report_path.split('/')[-1].rsplit('.', 1)[0]}.rtf"
     params_dict = json.loads(params) if params else {}
 
     try:

@@ -10,6 +10,8 @@ from .commands.attach import attach_group
 from .commands.system import system_group
 from .commands.entry import entry_group
 from .commands.user import user_group
+from .config import set_cli_instance
+from .commands.rpc import rpc_group
 
 
 @click.group()
@@ -31,6 +33,8 @@ def main(ctx, instance, verbose):
     ctx.ensure_object(dict)
     ctx.obj["instance"] = instance
     ctx.obj["verbose"] = verbose
+    # 顶层 -i 必须真的生效：子命令没带 -i 时用它（否则 ei 静默跑在默认实例上）
+    set_cli_instance(instance)
 
 
 # 注册命令组
@@ -42,6 +46,7 @@ main.add_command(attach_group)
 main.add_command(system_group)
 main.add_command(entry_group)
 main.add_command(user_group)
+main.add_command(rpc_group)
 
 
 if __name__ == "__main__":

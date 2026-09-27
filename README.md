@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.4.0
+- **版本**：0.10.0（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`）
 
 ## 安装 / 自举
 
@@ -63,6 +63,54 @@ frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志�
 #   —— 细节与「detached entity」坑见 SKILL.md §6.11
 #   delete 的参数是 UUID（不是任务名）；body 为裸数组，0.4.2 起返回值会被校验
 
+# 7.2 改服务端模板内容（🔴 生产写，先确认影响范围）
+#   平台 REST 没有写模板内容的接口；frcli 走 Designer 的「远程设计」通道（见 SKILL.md §6.7）
+frcli report ws-list "demo_group/demo_user"                    # 看服务端真实目录（只读）
+frcli report download "demo_group/demo_user/临时/a.cpt" -o a.cpt   # 取回模板原始字节（与服务器逐字节相同）
+#   ……本地改 a.cpt……
+frcli report upload a.cpt "demo_group/demo_user/临时/a.cpt" --force
+#   写前自动占锁（别人 Designer 开着则拒绝）+ 备份原文件到 ~/.frcli/backups/ + 回读 SHA256 校验
+frcli report delete "demo_group/demo_user/临时/a.cpt" --force      # 移入回收站，可恢复
+
+# 7.3) 写范围：0.6.0 起**默认拒绝** —— 没设范围就必须显式 --any-path
+export FRCLI_WRITE_SCOPE="demo_group/demo_user/临时"   # 推荐：限定范围
+#   之后 report upload / delete / edit --apply 越界（含 ../ 穿越、兄弟目录）一律拒绝
+#   单次放行：frcli report upload a.cpt "别的目录/a.cpt" --force --any-path
+
+# 7.4) 从零创作模板（0.8.0 起）：new / cell / dataset / param / style / table
+#      + crosstab（交叉表/动态列） / highlight（条件属性） / page（分页设置）
+#   全部默认 dry-run（打印可读 diff + bytes_before/after），加 --apply 才写；
+#   语法与配方见 references/cpt-authoring.md；**8 类复杂报表配方见 references/cpt-patterns.md**
+#   （分组小计/交叉表/条件属性/多数据集/参数联动/日期维度/分页/公式实战，每条都有逐格实测证据）
+R="demo_group/demo_user/临时/demo.cpt"
+frcli report new "$R" --apply                       # 空白模板（自带可渲染骨架）
+frcli report dataset "$R" --add ds1 --conn demo_conn \
+    --sql "select 'A' code,1 cnt union all select 'B',2" --param topn=10 --apply
+frcli report table "$R" --dataset ds1 --at A2 --columns code,cnt --header --apply
+#   数据设置（<RG>）默认 list（记录原样展开）；不写 <RG> 服务端按「分组」去重、会静默改数
+frcli report table "$R" --dataset ds1 --at A4 --columns 地区,销售员,销量 \
+    --mode summary --group-by 地区,销售员 --fn sum --header --apply
+frcli report cell "$R" --at D3 --set-ds-mode list --apply
+frcli report cell "$R" --at A1 --set-formula '="TOP" + $topn' --merge A1:C1 --apply
+frcli report cell "$R" --list -f table              # 只读：A1/值/公式/绑定/ds_mode/扩展/样式
+frcli report style "$R" --add --num-format "#,##0" --bold --border --apply
+frcli report param "$R" --add topn=10 --apply       # 模板参数（公式里的 $x 靠它给默认值）
+
+# 7.4.1) 三类复杂效果（各自一条命令）
+frcli report chart "$R" --at A1 --dataset ds1 --type column --category 地区 --series 产品 \
+    --value 销量 --fn sum --title "销量对比" --show-title --apply   # 图表（导出 xlsx 是嵌入图片）
+frcli report widget "$R" --param 地区 --type combo --options 华东,华南 --default 华东 --apply
+frcli report link "$R" --at A3 --to "别的报表.cpt" --param center='=$A3' --apply  # 钻取（预览态）
+frcli report crosstab "$R" --dataset ds1 --at A3 --row 地区 --col 产品 --value 销量 \
+    --agg sum --total-row --total-col --apply       # 交叉表：列数随数据自动增长
+frcli report highlight "$R" --at C3 --rule 'v>1000:bg=#FFC7CE,fg=#9C0006,bold' \
+    --rule 'ROW()%2=0:bg=#F2F2F2' --apply           # 条件属性（规则按顺序生效，后覆盖前）
+frcli report highlight "$R" --at C3 --list          # 只读回看规则
+frcli report page "$R" --freeze 1,0 --header-height 30 --apply
+frcli report cell "$R" --at A3 --bind ds1.d --ds-result "FORMAT(TODATE(\$\$\$,'yyyyMMdd'),'yyyy年MM月')" --apply
+frcli report cell "$R" --at A4 --set-formula "=SUM(C3)" --expand-left A3 --apply   # 组内小计挂父格
+#   验收必须逐格读回（写错列名/公式/样式索引，服务端照样导出"成功"）
+
 # 8. 附件（服务器附件缓存，非报表目录）
 frcli attach upload /tmp/说明.docx --name 说明.docx   # → 返回 attach_id
 frcli attach remove default1789441975426_Olw7l        # 用完清理
@@ -73,7 +121,7 @@ frcli attach remove default1789441975426_Olw7l        # 用完清理
 | 命令组 | 用途 | 主要命令 |
 |--------|------|----------|
 | `server` | 多实例配置 | `list` / `add` / `remove` / `set-default` / `test` |
-| `report` | 报表模板 | `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed`（`upload` / `delete` 未实现：服务器无写模板内容的 REST 接口） |
+| `report` | 报表模板 | `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed` / `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` |
 | `export` | 报表导出 | `pdf` / `excel` / `word` / `image` / `csv` / `batch` |
 | `attach` | 服务器附件 | `upload` / `remove`（附件缓存，不动报表目录） |
 | `system` | 系统与平台信息 | `version` / `health` / `modules` / `authority` / `login-policy` |
@@ -124,6 +172,12 @@ fanruan_v10/
 ├── src/frcli/            # CLI 唯一源码
 ├── references/
 │   ├── install.md        # 自检 + 自举手册
+│   ├── cpt-authoring.md  # 模板创作手册（命令 + XML 语法 + 配方 + 坑点）
+│   ├── cpt-patterns.md   # 第一辑：8 类复杂报表配方（分组小计/交叉表/条件属性/多数据集/参数/日期/公式）
+│   ├── cpt-patterns2.md  # 第二辑：图表/参数控件/钻取超链接/层次坐标/分页（含"写错的对照"与验收通道矩阵）
+│   ├── cpt-features.md   # cpt 语料普查（1602 个官方模板频次 + 片段 + 默认值 + 对照表）
+│   ├── cpt-xml.md        # cpt 结构速查（定点字节读写）
+│   ├── remotedesign.md   # 远程设计 RPC 协议（写模板的底层）+ 复核手册
 │   ├── run.py            # 跨平台启动器（自举 + 软链自愈 + 版本提示）
 │   ├── run.sh            # Unix 便捷入口
 │   └── frcli             # 软链 shim（PATH 中的 frcli 指向它）
@@ -132,7 +186,20 @@ fanruan_v10/
 
 ## 已知限制
 
-- `report upload` / `report delete`：CLI 有入口但未实现，服务器也不支持 Web API 改模板 —— 改模板走决策平台网页
+- 0.8.0 起可**从零创作**模板（`report new/cell/dataset/param/style/table` +
+  `crosstab` 交叉表 / `highlight` 条件属性 / `page` 分页设置，见 `references/cpt-authoring.md`
+  与 `references/cpt-patterns.md`）；0.5.0 起 `report upload` / `report delete` 走远程设计通道。仍有的限制：
+  - 单元格支持值/公式/数据集列/合并/样式/扩展/条件属性/`<Result>` 表达式/HTML 渲染；
+    图表、填报控件、页眉页脚**内容**仍需 Designer（`report page` 只读写高度与冻结列）
+  - 「每页重复标题行」= 报表级 `<ReportPageAttr><HR F="起" T="止"/></ReportPageAttr>`
+    （`report page --repeat-header-rows 1:1`；实测加高表头后 PDF 3 页 → 7 页）；
+    页眉页脚页码用 `report page --footer-text '"第 " + $$page_number + " 页"' --footer-formula`
+  - 组内排名 `RANK()` 在本安装求值失败（渲染 `#NAME?`）→ 排名写在 SQL 里；
+    `ACCSUM`/`COUNTD`/`DATEFORMAT` 等函数名不存在（写了整张模板渲染不出来）
+  - 列名无法离线核对（要连库才知道）：写错不报错、只会渲染出空列，验收必须逐格读回
+  - 账号必须被授予「远程设计」权限且覆盖目标目录；无权限时服务端**静默跳过写入**，靠回读校验兜底
+  - 模板被其他 Designer 打开（占锁）时拒绝覆盖
+  - `delete` 是移入服务端回收站，不是物理删除
 - 无 `query` 命令（早期 README 遗留）：要看数据集 SQL 用 `report datasets`
 - 导出遇到报表侧错误（数据集 SQL 报错、缺参数）时返回 HTML 出错页面且 HTTP 200，CLI 仍报 `status: ok` —— 必须校验文件魔数
 - 认证失效不返回 401，而是 302 到 CAS 登录页；`schedule list` / `report list` 的 `[]` 优先怀疑认证（0.1.1 起自动重登并复验，仍失败才报 `AUTH_FAILED`）
