@@ -319,8 +319,8 @@ def emit_module(catalog: dict, home: Path) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser(description="反解远程设计服务签名，生成 rpc_services.py")
     ap.add_argument("--home",
-                    default=os.environ.get("FINEREPORT_HOME", "<FineReport 安装目录>"),
-                    help="FineReport 安装目录（默认 $FINEREPORT_HOME 或 <FineReport 安装目录>）")
+                    default=os.environ.get("FINEREPORT_HOME", ""),
+                    help="FineReport 安装目录（取 $FINEREPORT_HOME；未设则必填）")
     ap.add_argument("--services", help="服务类清单 JSON（/service 的返回值）；缺省用内置清单")
     ap.add_argument("-o", "--output", help="输出文件；缺省覆盖 src/frcli/rpc_services.py")
     args = ap.parse_args(argv)
@@ -337,6 +337,15 @@ def main(argv=None):
         services = list(DEFAULT_SERVICES)
 
     catalog = build_catalog(services, home)
+    # 护栏：空清单/全无方法时**拒绝覆盖**。2026-09 实测踩过 —— 不设 --home 直接跑，
+    # 会把 rpc_services.py 覆盖成「28 个服务、0 个方法」的残版（生成器不该能悄悄把产物清空）。
+    total_methods = sum(len(v["methods"]) for v in catalog.values())
+    if not catalog or total_methods == 0:
+        print(f"❌ 生成的清单是空的（服务 {len(catalog)} 个、方法 {total_methods} 个），"
+              f"已拒绝覆盖 {args.output or 'src/frcli/rpc_services.py'}。\n"
+              f"   多半是 --home / $FINEREPORT_HOME 没指向真正的安装目录（当前: {home}）。",
+              file=sys.stderr)
+        return 3
     text = emit_module(catalog, home)
     target = Path(args.output) if args.output else Path(__file__).with_name("rpc_services.py")
     target.write_text(text, encoding="utf-8")

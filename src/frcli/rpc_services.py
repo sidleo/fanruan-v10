@@ -4,11 +4,14 @@
 服务类清单来自 `/decision/remote/design/service`；签名为该版本 jar 的反解结果。
 """
 
+import os
 from typing import NamedTuple
 
 
 GENERATED_AT = '2026-09-27 17:59:46'
-SOURCE_HOME = '<FineReport 安装目录>'
+#: 生成时的安装目录 —— **不写死环境路径**：由 `$FINEREPORT_HOME` 指定；
+#: 未设时依赖它的自检（tests/test_rpc.py 的 javap 对齐）自动跳过，不影响其它功能。
+SOURCE_HOME = os.environ.get("FINEREPORT_HOME", "")
 
 
 class M(NamedTuple):

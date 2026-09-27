@@ -474,10 +474,10 @@ def test_generated_catalog_shape():
 
 
 def test_generated_catalog_matches_javap_when_available():
-    """实测环境有 FineReport 时，抽样把生成结果与 javap 现算结果对齐。"""
+    """设了 $FINEREPORT_HOME 且指向 FineReport 安装包时，抽样用 javap 现算结果对齐。"""
     home = Path(SERVICES_SOURCE_HOME)
     if not home.is_dir() or not C.discover_jars(home):
-        pytest.skip("实测环境没有 FineReport 安装包")
+        pytest.skip("未设 $FINEREPORT_HOME（或该目录里没有 FineReport 安装包）")
     jars = C.discover_jars(home)
     for cls in sorted(EXPECTED_SERVICES):
         jar = C.locate_class(cls, jars)
