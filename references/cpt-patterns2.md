@@ -22,7 +22,7 @@
 | **页眉页脚 / 页码 / 重复标题行 / 分页** | **`export pdf` + pdfium 出图看**（`report image` **不渲染分页结果**，它输出版面流 → 假阴性） | 用 image 验页脚 → 永远看不到 |
 | **冻结行列** | 只能验 XML 往返 + 预览页交互；**导出态本来就无差异** | 记成"功能没生效/未确证" |
 
-出图看（实测环境已装纯 Python 光栅化器，无系统依赖）：
+出图看（已装纯 Python 光栅化器，无系统依赖）：
 
 ```bash
 python -m pip install pypdfium2          # 已装：<venv>/bin/python

@@ -117,11 +117,14 @@ fanruan_v10/
   2026-09 事故：agent 在没设范围的 shell 里跑 `report edit --apply`，写出了团队目录
   （`demo_group/other_user/legacy_rpt.cpt`），靠 `upload_template` 的自动备份才逐字节还原。
 - **不写入任何账号、密码、token、连接信息**到本目录（配置在 `~/.frcli/`，属机器本地状态，不进仓库）。
-- **⚠️ 不要在**本目录**打可分发的 `.skill` 包**：本仓库保留**真实**标识符（文档要能照抄跑），
-  打出来的包**含敏感信息**，一旦被复制到公开仓库即泄露。
-  **可分发的包只有一个来源**：`~/yh_user/Project/skills/fanruan-v10/fanruan-v10.skill`（已脱敏），
-  同步与脱敏步骤见那边的 `PUBLISH_NOTES.md`。
-  2026-09-27：本目录曾留有一个手工打的 0.4.2 未脱敏包（`dist/`，git 已忽略），已删除以免误用。
+- **⚠️ 本仓库必须保持"脱敏"状态（可能公开）**：
+  · **只写能力，不写环境** —— 不对具体机器、路径、账号、公司、组织、生产报表做说明
+    （安装路径写 `<FineReport 安装目录>`、虚拟环境写 `<venv>`、目录写 `demo_group/...` 这类占位符）。
+    **环境与个人事实属于知识库（llm-wiki），不属于本仓库。**
+  · **打包产物在 `dist/fanruan-v10.skill`**（`dist/` 已被 gitignore，属本地产物）；
+    打包前必须过一遍黑名单复扫（人/工号/域名/组织/真实报表名），**工作树与历史都要扫**。
+  · 2026-09 教训：曾有一个手工打的 0.4.2 包长期留在 `dist/`（未脱敏、且版本过期），已删除；
+    也曾在仓库历史里留下真实标识符（10 个提交），靠重写历史才清掉。
 - **新增危险操作**：在 `SKILL.md`「安全约束」标 🔴，并要求执行前向用户确认。
 - **不要顺手改无关代码**：只动与本次需求相关的文件。
 
@@ -310,6 +313,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 无新增失败；至少 1 条只读命令真实跑通。**历史遗留**：`test_config.py` 的 `test_load_empty_config` / `test_list_instances_empty` 在实测环境固定失败 —— 它们只 patch 了 `config.DEFAULT_CONFIG_PATH`，而 `load_full_config()` 走 `CONFIG_SEARCH_PATHS` 会落回真实 `~/.frcli/config.yaml`（实测环境有 `yh` 实例），与本次搬迁无关 |
+| 测试 | `python -m pytest tests/` 无新增失败；至少 1 条只读命令真实跑通。**历史遗留**：`test_config.py` 的 `test_load_empty_config` / `test_list_instances_empty` 在固定失败 —— 它们只 patch 了 `config.DEFAULT_CONFIG_PATH`，而 `load_full_config()` 走 `CONFIG_SEARCH_PATHS` 会落回真实 `~/.frcli/config.yaml`（实测环境有 `yh` 实例），与本次搬迁无关 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

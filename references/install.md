@@ -42,7 +42,7 @@ python -m frcli server list
 python <base>/references/run.py server list
 ```
 
-> 原理：`python -m frcli` 把 `src/` 当作包路径，绕开 PATH。只要求实测环境有 Python 3.10+。
+> 原理：`python -m frcli` 把 `src/` 当作包路径，绕开 PATH。只要求环境里有 Python 3.10+。
 
 ### 自动建软链（一次自举，之后直接可用）
 

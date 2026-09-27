@@ -1,7 +1,7 @@
 """远程设计通道的编解码回归测试。
 
 参考字节来自真实帆软实现（Designer 侧 com.fr.rpc.serialization.
-SafeInvocationSerializer / ResultSerializer），用实测环境 Designer jar 跑
+SafeInvocationSerializer / ResultSerializer），用Designer jar 跑
 `RefDump` 生成后固化在下面，因此这些用例不需要 Java、不需要联网。
 """
 
@@ -83,7 +83,7 @@ def test_hashmap_iteration_order_is_java_like():
 # --- 加密：与帆软 SecurityToolbox 的实测输出一一对应 -------------------------
 SEED = "FGljWYEQgXJGEhTP"
 SM4_KEY = "9d679ac64745e8a20ba776a1092463e1"
-# (明文, aesEncrypt 结果, sm4Encrypt 结果)，由实测环境 Designer jar 打印
+# (明文, aesEncrypt 结果, sm4Encrypt 结果)，由Designer jar 打印
 CRYPTO_VECTORS = [
     ("808580", "ZlbXgIIyVQ3UGuMNGu2s6w==", "FNjXTd9tLJiJPwigcDqAvA=="),
     ("a", "aqR0fI1sONXoketSh+7FzA==", "XQS5StkL7vonNospyXrN8Q=="),

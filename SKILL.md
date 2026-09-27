@@ -377,7 +377,7 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 - 实测（2026-09，fr.example.com）：新建 .cpt → 回读 SHA256 一致 → **决策平台模板树立即出现
   该模板、`report info` 能解析出数据集清单**；覆盖、删除（回收站）均通过。
 - 上传后平台侧缓存：服务端按文件 mtime 失效模板缓存，实测无需额外刷新动作。
-- 协议原文与「换版本后怎么复核」见 `references/remotedesign.md`（含用实测环境 Designer jar
+- 协议原文与「换版本后怎么复核」见 `references/remotedesign.md`（含用Designer jar
   生成参照报文、逐字节比对的脚本）。
 - **28 个服务的全量签名**（150 个方法 + 只读/写/deny 判定 + 所在 jar）：`references/remote-services.md`。
   用 `frcli rpc services` 看线上清单，`frcli rpc methods <类>` 看签名。

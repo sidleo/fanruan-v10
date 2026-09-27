@@ -32,7 +32,7 @@
 export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
 export FRCLI_WRITE_SCOPE="demo_group/demo_user/skill测试"   # 写操作 fail-closed，必须先设
 export FRCLI_TIMEOUT=300                                     # 默认 30s 对复杂报表必然超时
-cd ~/yh_user/Project/fanruan_v10
+cd <本项目目录>
 frcli() { PYTHONPATH=src <venv>/bin/python -m frcli "$@"; }   # 或 pip install -e .
 B="demo_group/demo_user/skill测试/patterns"                        # 本配方集的样例目录
 ```

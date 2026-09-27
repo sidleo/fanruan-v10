@@ -6,7 +6,7 @@
 import json, os, subprocess, sys, csv as csvmod, pathlib, time
 import openpyxl
 
-ROOT = "~/yh_user/Project/fanruan_v10"
+ROOT = "<本项目目录>"
 D = "demo_group/demo_user/skill测试"
 PY = os.path.expanduser("<venv>/bin/python")
 ENV = {**os.environ, "PYTHONPATH": "src", "FRCLI_TIMEOUT": "300",

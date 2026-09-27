@@ -550,7 +550,7 @@ return !path.contains("reportlets") || checkAuth(path);   // checkAuth = 该账�
 3. **非标量参数编不出来**：`Connection` / `TableData` / `LockItem` / `Class` 这类对象参数
    需要构造完整 Java 对象，`rpc call` 明确报错。受影响的方法在 §1 的「可直接调」列里
    已经扣掉（如 `DataOperatorProvider` 18 个方法只有 3 个能调）。
-4. **签名是安装包内的 jar 的快照**：方法签名来自实测环境 FineReport 10.0.19 的 jar，
+4. **签名是安装包内的 jar 的快照**：方法签名来自 FineReport 10.0.19 的 jar，
    **不是线上真值**。线上类版本可能不同 —— 实测 `CommonOperator.getContextName()`
    安装包内的 jar 里有、线上没有（`NoSuchMethodException`）。以线上试调结果为准。
 5. **`getFileOfFileVersion` 拿不到历史版本内容**：实测只返回 VCS 缓存路径

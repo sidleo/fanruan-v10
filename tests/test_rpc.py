@@ -1,6 +1,6 @@
 """`frcli rpc` 的离线回归测试：签名解析 / 策略判定 / 路径守门 / 参数编码 / 解码修复。
 
-参考字节由实测环境 JDK 的 `ObjectOutputStream` 生成后固化（`javap` 抽样的签名同理），
+参考字节由JDK 的 `ObjectOutputStream` 生成后固化（`javap` 抽样的签名同理），
 因此这些用例**不需要 Java、不需要联网**，换 FineReport 版本后仍可跑。
 """
 
