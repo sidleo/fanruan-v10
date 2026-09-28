@@ -4,6 +4,10 @@ __pycache__/
 *.pyo
 *.egg-info/
 dist/
+# 例外：可分发的 skill 包要入库（其余 dist 内容仍忽略）
+!dist/
+dist/*
+!dist/fanruan-v10.skill
 build/
 .eggs/
 *.egg
