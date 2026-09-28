@@ -248,3 +248,54 @@ def test_page_list_reads_settings():
     text, _ = reportops.plan_page(make_template(), header_height=20)
     info = cptxml.page_settings(text)
     assert info["header_height_pt"] == 20.0 and info["header"] == [] and info["footer"] == []
+
+
+# --- 学自另一个会话的两个静默坏法（2026-09）-----------------------------------
+def test_bold_action_always_writes_size():
+    """`bold` 不带 size 会让 FRFont 变成 **0 号字**（值还在、整行看不见）。
+
+    实测：`--rule 'v>0:bold'` 导出 xlsx 的 font.size = 0.0。修法是继承目标格样式字号。
+    """
+    from frcli import cptxml
+    def act(spec, **kw):
+        return "".join(cptxml.highlight_action_xml(spec, **kw))
+
+    assert 'size="' in act("bold"), "字体动作必须带 size，否则服务端按 0 号字处理"
+    assert 'size="72"' in act("bold"), "无继承时应退到 9 磅（72 = 9×8）"
+    assert 'size="96"' in act("bold,size=12")          # 指定了就用指定的
+    assert 'size="120"' in act("bold", inherit_size=120)  # 继承优先
+    assert "FRFont" not in act("bg=#FFC7CE")            # 纯背景动作不该凭空带字体
+
+
+def test_cell_font_size_reads_style():
+    from frcli import cptxml
+    t = cptxml.empty_skeleton() if hasattr(cptxml, "empty_skeleton") else None
+    if t is None:
+        import pytest
+        pytest.skip("骨架构造函数名不同")
+    xml = ('<WorkBook><StyleList>'
+           '<Style><FRFont name="SimSun" style="0" size="96"/></Style>'
+           '</StyleList>'
+           '<Report class="com.fr.report.worksheet.WorkSheet" name="sheet1">'
+           '<CellElementList>'
+           '<C c="0" r="0" s="0"><O><![CDATA[x]]></O><Expand/></C>'
+           '</CellElementList></Report></WorkBook>')
+    cell = cptxml.find_cell(xml, "A1")
+    assert cptxml.cell_font_size(xml, cell) == 96
+
+
+# --- 学自另一个会话（2026-09）：只改字号也要能建样式 ---------------------------
+def test_style_preset_accepts_size_only():
+    """`--add --size-pt 12` 曾被拒（"至少要给一项"把 size 排除在外）→ 建不出只改字号的样式。"""
+    from frcli import reportops
+    from frcli.exceptions import ApiError
+    tpl = ('<WorkBook><StyleList/></StyleList>'
+           '<Report class="com.fr.report.worksheet.WorkSheet" name="s"><CellElementList/>'
+           '</Report></WorkBook>').replace("</StyleList></StyleList>", "</StyleList>")
+    text, ch = reportops.plan_style_preset(tpl, size_pt=12)
+    assert ch[0]["kind"] == "style.add" and ch[0]["size_pt"] == 12
+    assert 'size="96"' in text, "12 磅应写成 96（1/8 磅单位）"
+    # 一项都不给仍要报错
+    import pytest
+    with pytest.raises(ApiError):
+        reportops.plan_style_preset(tpl)

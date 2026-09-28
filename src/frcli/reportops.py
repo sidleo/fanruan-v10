@@ -911,15 +911,17 @@ def plan_style(text: str, xml_file: str = None, xml: str = None):
 
 
 def plan_style_preset(text: str, fmt: str = None, bold: bool = False, bg: str = None,
-                      align: str = None, border: bool = False, size_pt: float = 9):
-    if not any([fmt, bold, bg, align, border]):
-        raise ApiError("新建样式至少要给一项：--format / --bold / --bg / --align / --border")
+                      align: str = None, border: bool = False, size_pt: float = None):
+    # ⚠ `--size-pt` 也要算"给了一项"：以前它默认 9 且被排除在校验外，
+    # 于是「只改字号」的样式根本建不出来（报"至少要给一项"）。
+    if not any([fmt, bold, bg, align, border, size_pt]):
+        raise ApiError("新建样式至少要给一项：--format / --bold / --bg / --align / --border / --size-pt")
     xml = cptxml.style_xml(fmt=fmt, bold=bold, bg=bg, align=align, border=border,
-                           size_pt=size_pt)
+                           size_pt=size_pt or 9)
     new_text, index = cptxml.append_style(text, xml)
     return new_text, [{"kind": "style.add", "index": index, "format": fmt,
                        "bold": bool(bold), "bg": bg, "align": align,
-                       "border": bool(border), "size_pt": size_pt}]
+                       "border": bool(border), "size_pt": size_pt or 9}]
 
 
 def edit_style(config, report_path: str, apply: bool = False, preset=False, **kwargs) -> dict:
@@ -1093,13 +1095,23 @@ def plan_highlight(text: str, at: str, sheet: str = None, rules=(), clear: bool 
         cptxml.condition_xml(cond)                   # 提前触发本地校验
         cptxml.highlight_action_xml(act)
         norm.append((cond, act, name))
-    snippet = cptxml.highlight_list_xml(norm)
+    # 字体动作继承目标格现有字号：FRFont 是整体替换，不带 size 会变 0 号字（整行看不见）
+    inherit = None
+    for a1 in targets:
+        cell = cptxml.find_cell(text, a1, sheet)
+        if cell is not None:
+            inherit = cptxml.cell_font_size(text, cell, sheet)
+            if inherit:
+                break
+    snippet = cptxml.highlight_list_xml(norm, inherit_size=inherit)
     missing = []
+    dropped = 0
     for a1 in targets:
         cell = cptxml.find_cell(text, a1, sheet)
         if cell is None:
             missing.append(a1)
             continue
+        dropped += cell.get("hl_count") or 0
         text = cptxml.set_highlight_list(text, cell, snippet)
     if len(missing) == len(targets):
         raise ApiError(f"{at} 里没有单元格：条件属性只能挂在已有单元格上"
@@ -1109,6 +1121,12 @@ def plan_highlight(text: str, at: str, sheet: str = None, rules=(), clear: bool 
     if missing:
         changes.append({"kind": "warning",
                         "message": f"{at} 里这些格子还不存在，已跳过: {', '.join(missing)}"})
+    if dropped:
+        # `--rule` 的语义是**设置**（整表替换），不是追加 —— 静默冲掉旧规则会让人以为"两条都在"
+        changes.append({"kind": "warning",
+                        "message": f"⚠ 这些格子上原有的 {dropped} 条条件属性被**整表替换**掉了"
+                                   "（`--rule` 是设置语义，不是追加）。要保留旧规则就把它们"
+                                   "写进同一次调用的多个 `--rule`，顺序即优先级。"})
     return text, changes
 
 

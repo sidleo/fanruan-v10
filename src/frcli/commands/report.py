@@ -774,7 +774,7 @@ def report_param(report_path, list_only, adds, removes, defaults, apply, any_pat
 @click.option("--bg", help="底色 #RRGGBB")
 @click.option("--align", type=click.Choice(["left", "center", "right"]), help="对齐")
 @click.option("--border", is_flag=True, help="四边框")
-@click.option("--size-pt", type=float, default=9.0, show_default=True, help="字号（磅）")
+@click.option("--size-pt", type=float, default=None, help="字号（磅）；只改字号也行")
 @click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印 diff）")
 @click.option("--any-path", is_flag=True,
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")

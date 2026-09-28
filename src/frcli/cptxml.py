@@ -1076,7 +1076,7 @@ def condition_xml(spec: str) -> str:
     return formula_condition_xml(raw)
 
 
-def highlight_action_xml(spec: str):
+def highlight_action_xml(spec: str, inherit_size: int = None):
     """一条规则的动作串 → `<HighlightAction>` 片段列表。
 
     语法（逗号分隔，可任意组合）：
@@ -1128,10 +1128,14 @@ def highlight_action_xml(spec: str):
         # `ForegroundHighlightAction` 设的字色**覆盖回默认**（2026-09 实测：同一规则里
         # `bg=…,fg=…,bold` 导出后字色丢失、只剩加粗）。所以只要同时有字体动作，
         # 字色就必须并进 `<FRFont foreground=…>`，不能再单出一条 Foreground 动作。
+        #
+        # ⚠⚠ **`size` 不能省**：FRFont 是整体替换，不带 size 时服务端按 **0 号字**处理 ——
+        # 值还在 xlsx 里，但**整行看不见**（实测：`--rule 'v>0:bold'` → 导出 size=0.0）。
+        # 所以没显式给 size 时继承目标格样式里的字号，再退到 9 磅。
+        size = font.get("size") or inherit_size or 72
         attrs = f' name="{_escape_attr(font.get("name", "微软雅黑"))}"'
         attrs += f' style="{font.get("style", 0)}"'
-        if "size" in font:
-            attrs += f' size="{font["size"]}"'
+        attrs += f' size="{int(size)}"'
         if fg_color:
             attrs += f' foreground="{_color(fg_color)}"'
         out.append(f'<HighlightAction class="{HIGHLIGHT_ACTION_PKG}.FRFontHighlightAction">'
@@ -1165,6 +1169,24 @@ def _row_height_fu(value) -> int:
                        f"收到 {value!r}") from e
 
 
+def cell_font_size(text: str, cell, sheet: str = None) -> int:
+    """目标格**当前**的字体字号（XML 单位 = 1/8 磅）；取不到返回 None。
+
+    用于条件属性的字体动作继承 —— FRFont 是整体替换，不带 size 会变成 0 号字（整行不可见）。
+    """
+    if not cell:
+        return None
+    idx = cell.get("style")
+    if idx is None:
+        return None
+    try:
+        st = styles(text)[int(idx)]        # ⚠ 这里拿到的是字符串 '0'，不能直接当列表下标
+    except (IndexError, TypeError, ValueError):
+        return None
+    m = re.search(r'<FRFont[^>]*\bsize="(\d+)"', st.get("xml") or "")
+    return int(m.group(1)) if m else None
+
+
 def highlight_xml(name: str, condition: str, actions) -> str:
     """一条 `<Highlight>`（条件 + 1..N 个动作）。"""
     acts = actions if isinstance(actions, str) else "\n".join(actions)
@@ -1177,9 +1199,10 @@ def highlight_xml(name: str, condition: str, actions) -> str:
     return "\n".join(parts)
 
 
-def highlight_list_xml(rules) -> str:
+def highlight_list_xml(rules, inherit_size: int = None) -> str:
     """一组规则 → `<HighlightList>`。rules = [(条件 spec, 动作 spec, 名字)]。"""
-    items = [highlight_xml(name, condition_xml(cond), highlight_action_xml(act))
+    items = [highlight_xml(name, condition_xml(cond),
+                           highlight_action_xml(act, inherit_size=inherit_size))
              for cond, act, name in rules]
     return "<HighlightList>\n" + "\n".join(items) + "\n</HighlightList>"
 
