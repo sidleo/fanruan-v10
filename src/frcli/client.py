@@ -112,7 +112,13 @@ def _unwrap_json(resp: httpx.Response, what: str) -> Any:
     (8 known properties: ...)`）。直接当数据用会静默拿到错误页，所以这里翻译成异常。
     """
     if "json" in resp.headers.get("content-type", ""):
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError:
+            # content-type 声明是 JSON，正文却是平台的 HTML 出错页 —— 直接 .json() 会抛
+            # `Expecting value: line 1 column 1 (char 0)`，被包成 code=UNKNOWN，看不出原因。
+            # 落到下面按出错页解析，把平台原文抛出来。
+            pass
     reason = ""
     for match in _HTML_ERROR_MSG.finditer(resp.text):
         text = html.unescape(re.sub(r"<[^>]+>", "", match.group(2))).strip()
@@ -445,10 +451,9 @@ class FineReportClient:
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/task"
         resp = self._post(url, json=config)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get("data", "")
-        return ""
+        # 用 _unwrap_json：平台对"任务配置缺字段"等一律回 200 + HTML 出错页，
+        # 裸 resp.json() 只会抛 `Expecting value…`（code=UNKNOWN），看不出真正原因。
+        return str((_unwrap_json(resp, "创建定时任务") or {}).get("data", ""))
 
     def update_schedule(self, task_id: str, config: dict) -> bool:
         """更新定时任务"""

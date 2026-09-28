@@ -235,6 +235,51 @@ def report_fonts(report_path, fmt, instance):
         error(e)
 
 
+@report_group.command("sheet")
+@click.argument("report_path")
+@click.option("--list", "do_list", is_flag=True, help="只读列出所有 sheet")
+@click.option("--add", "add_name", help="新增一张 sheet（克隆现有 sheet 的版面骨架）")
+@click.option("--clone-from", help="克隆哪张 sheet 的版面（缺省第一张）")
+@click.option("--rename", nargs=2, type=(str, str), metavar="旧名 新名", help="重命名 sheet")
+@click.option("--remove", "remove_name", help="删除 sheet（不能删最后一张）")
+@click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印 diff）")
+@click.option("--any-path", is_flag=True,
+              help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def report_sheet(report_path, do_list, add_name, clone_from, rename, remove_name,
+                 apply, any_path, fmt, instance):
+    """工作簿 sheet 管理（🟠 默认 dry-run）
+
+    \b
+    例：
+      frcli report sheet …/r.cpt --list
+      frcli report sheet …/r.cpt --add 口径说明 --apply
+      frcli report sheet …/r.cpt --rename 口径说明 说明 --apply
+      frcli report sheet …/r.cpt --remove 说明 --apply
+    """
+    try:
+        if apply and not do_list:
+            assert_write_scope(report_path, any_path)
+        config = load_config(instance)
+        if do_list:
+            result = reportops.edit_sheet(config, report_path, apply=False, action="list")
+        elif add_name:
+            result = reportops.edit_sheet(config, report_path, apply=apply, action="add",
+                                          name=add_name, clone_from=clone_from)
+        elif rename:
+            result = reportops.edit_sheet(config, report_path, apply=apply, action="rename",
+                                          name=rename[0], new_name=rename[1])
+        elif remove_name:
+            result = reportops.edit_sheet(config, report_path, apply=apply, action="remove",
+                                          name=remove_name)
+        else:
+            raise click.UsageError("要给 --list / --add / --rename / --remove 之一")
+        _out_plan(result, fmt)
+    except Exception as e:
+        error(e)
+
+
 @report_group.command("versions")
 @click.argument("report_path")
 @click.option("-n", "--limit", default=20, show_default=True, help="最多列多少条")

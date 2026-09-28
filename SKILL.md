@@ -686,6 +686,15 @@ frcli report cell "$R" --at D2 --set-ds-mode list --apply      # 改已有格的
   "标签不在 ≠ 设置没有"的又一例；但上面实测说明它不影响分页重复行为。
 
 
+### 6.20 工作簿 sheet 管理：`report sheet`
+
+`frcli report sheet <模板> --list | --add 名 [--clone-from 名] | --rename 旧 新 | --remove 名`
+（默认 dry-run，`--apply` 才写）。`--add` **克隆已有 sheet 的版面骨架**（纸张/列宽都在里面）但清空单元格 —— 加「口径说明」页这类需求不用再手工拼 `<Report>` 块。
+
+### 6.21 启动器三坑（递归 / cwd / JSONDecodeError）
+
+见 `AGENTS.md` 同名条目：`run.py` 递归护栏、启动器**不改 cwd**（否则相对路径写错地方）、平台出错页冒充 JSON 时不漏 `Expecting value`。
+
 ### 6.19 条件属性的两个静默坑（2026-09 由另一个会话暴露，均已修）
 
 | 坑 | 症状 | 判据/对策 |

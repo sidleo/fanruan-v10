@@ -931,6 +931,32 @@ def edit_style(config, report_path: str, apply: bool = False, preset=False, **kw
     return commit(config, report_path, text, new_text, "style", changes, apply=apply)
 
 
+def plan_sheet(text: str, action: str, name: str = None, new_name: str = None,
+               clone_from: str = None):
+    """sheet 增删改（内存计算）。action: list / add / rename / remove"""
+    before = cptxml.sheet_names(text)
+    if action == "list":
+        return text, [{"kind": "sheet.list", "sheets": before}]
+    if action == "add":
+        text, added = cptxml.add_sheet(text, name, clone_from=clone_from)
+        return text, [{"kind": "sheet.add", "name": added, "clone_from": clone_from or before[0],
+                       "sheets": cptxml.sheet_names(text)}]
+    if action == "rename":
+        text = cptxml.rename_sheet(text, name, new_name)
+        return text, [{"kind": "sheet.rename", "from": name, "to": new_name,
+                       "sheets": cptxml.sheet_names(text)}]
+    if action == "remove":
+        text = cptxml.remove_sheet(text, name)
+        return text, [{"kind": "sheet.remove", "name": name, "sheets": cptxml.sheet_names(text)}]
+    raise ApiError(f"不认识的 sheet 操作 {action!r}")
+
+
+def edit_sheet(config, report_path: str, apply: bool = False, action: str = None, **kwargs) -> dict:
+    text = read_template(config, report_path).decode("utf-8")
+    new_text, changes = plan_sheet(text, action, **kwargs)
+    return commit(config, report_path, text, new_text, "sheet", changes, apply=apply)
+
+
 def template_styles(config, report_path: str) -> dict:
     text = read_template(config, report_path).decode("utf-8")
     items = cptxml.styles(text)

@@ -84,7 +84,9 @@ def main() -> int:
     return subprocess.call(
         [python, "-m", "frcli", *sys.argv[1:]],
         env=env,
-        cwd=str(SRC_DIR),
+        # ⚠ 不要改 cwd：`-m frcli` 靠 PYTHONPATH 就能解析，而传 cwd=SRC_DIR 会把
+        # 用户的**相对路径参数**（`-o out.xlsx`、`report upload x.cpt`）解析到 skill 源码目录 ——
+        # 实测：从 /tmp 跑 `export -o relout.xlsx`，文件落在了 <skill>/src/ 下（静默写错地方）。
     )
 
 

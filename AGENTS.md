@@ -239,6 +239,14 @@ fanruan_v10/
 配套：`--num-format/--bold/--bg` 这类"造样式"的选项先**复用等价样式**（归一化 XML 比对），
 否则反复跑会让 `<StyleList>` 无限膨胀（修复前实测 5→6→7→8），幂等性也无从谈起。
 
+### 启动器三坑：无限自我复制 / 改 cwd / 报 JSONDecodeError 原文（2026-09 学自另一会话）
+
+| 坑 | 症状 | 处置 |
+|---|---|---|
+| **`run.py` 与 PATH 里的 `frcli` 互相调用** | 若 PATH 的 `frcli` 是指向 `run.py` 的 shim，就 `run.py → which(frcli) → shim → run.py → …` **无限自我复制**（实测 1600+ 进程、`fork: Resource temporarily unavailable`，只能反复 `pkill -9`） | `run.py` 已加护栏：环境标记 `FRCLI_RUNPY_DEPTH` + 解析软链自指检测 + 深度上限；命中就跳过"方式 1"改用内置源码 |
+| **启动器改 cwd 到 skill 源码目录** | `references/frcli` 与 `run.py` 原传 `cwd=str(SRC_DIR)` ⇒ 用户的**相对路径参数**全部落错地方：实测从 `/tmp` 跑 `export -o relout.xlsx`，文件写进了 `<skill>/src/`（静默）；`report upload x.cpt` 则报 `File does not exist` | 两处 `cwd` 已删除（`-m frcli` 靠 PYTHONPATH 即可解析） |
+| **平台出错页冒充 JSON** | 平台对"任务配置缺字段"等回 200 + HTML，而 `create_schedule` 裸 `resp.json()` ⇒ 抛 `Expecting value: line 1 column 1 (char 0)` + `code=UNKNOWN`，看不出真正原因 | `_unwrap_json` 已加固（content-type 声明 JSON 也兜住 `ValueError` 并按出错页解析）；`create_schedule` 改走 `_unwrap_json` |
+
 ### 条件属性：`bold` 会把字号写成 0（整行看不见），`--rule` 是替换不是追加
 
 **另一个会话（2026-09）用本 skill 时踩到，都是我们工具的坑，已修**：

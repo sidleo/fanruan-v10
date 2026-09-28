@@ -173,3 +173,24 @@ def test_export_report_goes_through_authed_request():
     src = inspect.getsource(FineReportClient.export_report)
     assert 'self._request("GET"' in src
     assert "self._http.get(export_url" not in src
+
+
+# --- 学自另一会话：平台出错页冒充 JSON 时不能漏成 UNKNOWN ----------------------
+@pytest.mark.parametrize("ctype", ["application/json", "text/html;charset=UTF-8"])
+def test_html_error_page_never_leaks_jsondecodeerror(ctype):
+    """`schedule create` 曾因裸 resp.json() 把出错页抛成
+    `Expecting value: line 1 column 1 (char 0)` + code=UNKNOWN（看不出原因）。"""
+    import httpx
+    from frcli.client import _unwrap_json
+    from frcli.exceptions import ApiError
+    # 平台真实形态：<div id="detail-message">…</div>（正文是 HTML 实体编码的）
+    html = ('<html><body>出错页面'
+            '<div id="detail-message">Unrecognized field &quot;taskCondition&quot; '
+            '(3 known properties: &quot;taskName&quot;,&quot;cron&quot;,&quot;id&quot;)'
+            '</div></body></html>')
+    r = httpx.Response(200, headers={"content-type": ctype}, text=html)
+    with pytest.raises(ApiError) as ei:
+        _unwrap_json(r, "创建定时任务")
+    msg = str(ei.value)
+    assert "Expecting value" not in msg, "不该把 JSONDecodeError 原文漏给用户"
+    assert "Unrecognized field" in msg, "要带上平台原文"

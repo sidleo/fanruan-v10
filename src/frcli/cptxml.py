@@ -2620,3 +2620,82 @@ def set_col_widths(text: str, widths, default_chars: float = None):
     new = (f'<ColumnWidth defaultValue="{dv}">\n'
            f"<![CDATA[{','.join(arr)}]]></ColumnWidth>")
     return text[:m.start()] + new + text[m.end():]
+
+
+# ---------------------------------------------------------------------------
+# sheet（工作簿里的 `<Report class="WorkSheet">`）
+# ---------------------------------------------------------------------------
+def add_sheet(text: str, name: str, clone_from: str = None) -> tuple:
+    """给模板追加一张 sheet，返回 (新文本, 新 sheet 名)。
+
+    做法：**克隆已有 sheet 的骨架**（页面设置/行列尺寸/样式引用都在里面），只把
+    `<CellElementList>` 清空、改掉 `name`。这样新 sheet 的纸张与列宽跟原表一致，
+    不会出现"新 sheet 是空白 A4、原表是横向大纸张"的错配。
+
+    2026-09 需求来源：另一个会话要给已有 .cpt 加一个「口径说明」页，当时只能
+    手工把 `<Report>` 块拼进 XML —— 这里补上这条能力。
+    """
+    import re as _re
+    name = (name or "").strip()
+    if not name:
+        raise ApiError("sheet 名不能为空")
+    if name in sheet_names(text):
+        raise ApiError(f"sheet {name!r} 已存在；现有: {', '.join(sheet_names(text))}")
+    sheets = sheet_elements(text)
+    if not sheets:
+        raise ApiError("模板里没有 <Report> sheet，不是可编辑的 cpt 版面")
+    src = None
+    if clone_from:
+        for el in sheets:
+            if (el.attrs.get("name") or "").strip() == clone_from:
+                src = el; break
+        if src is None:
+            raise ApiError(f"找不到要克隆的 sheet {clone_from!r}；现有: "
+                           f"{', '.join(sheet_names(text))}")
+    else:
+        src = sheets[0]
+    block = text[src.open_start:src.close_end]
+    # 改 name（只在 `<Report ...>` 开标签上改，别碰单元格内容）
+    m = _re.search(r"<Report\b[^>]*>", block)
+    if not m:
+        raise ApiError("克隆源里没找到 <Report> 开标签")
+    head = m.group(0)
+    if 'name="' in head:
+        new_head = _re.sub(r'name="[^"]*"', f'name="{_escape_attr(name)}"', head, count=1)
+    else:
+        new_head = head[:-1] + f' name="{_escape_attr(name)}">'
+    block = new_head + block[m.end():]
+    # 清空单元格
+    block = _re.sub(r"(<CellElementList\s*>).*?(</CellElementList>)",
+                    r"\1\2", block, count=1, flags=_re.S)
+    if "<CellElementList" not in block:
+        block = block.replace("</Report>", "<CellElementList></CellElementList></Report>", 1)
+    insert_at = sheets[-1].close_end
+    return text[:insert_at] + "\n" + block + text[insert_at:], name
+
+
+def remove_sheet(text: str, name: str) -> str:
+    if len(sheet_names(text)) <= 1:
+        raise ApiError("只剩一张 sheet，不能删（模板至少要有一张）")
+    for el in sheet_elements(text):
+        if (el.attrs.get("name") or "").strip() == name:
+            return text[:el.open_start] + text[el.close_end:]
+    raise ApiError(f"找不到 sheet {name!r}；现有: {', '.join(sheet_names(text))}")
+
+
+def rename_sheet(text: str, old: str, new: str) -> str:
+    import re as _re
+    new = (new or "").strip()
+    if not new:
+        raise ApiError("新 sheet 名不能为空")
+    if new in sheet_names(text):
+        raise ApiError(f"sheet {new!r} 已存在")
+    for el in sheet_elements(text):
+        if (el.attrs.get("name") or "").strip() == old:
+            block = text[el.open_start:el.close_end]
+            m = _re.search(r"<Report\b[^>]*>", block)
+            head = m.group(0)
+            head2 = (_re.sub(r'name="[^"]*"', f'name="{_escape_attr(new)}"', head, count=1)
+                     if 'name="' in head else head[:-1] + f' name="{_escape_attr(new)}">')
+            return text[:el.open_start] + head2 + block[m.end():] + text[el.close_end:]
+    raise ApiError(f"找不到 sheet {old!r}；现有: {', '.join(sheet_names(text))}")

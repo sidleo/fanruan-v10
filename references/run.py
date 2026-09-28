@@ -79,12 +79,39 @@ def _find_python_with_deps() -> str | None:
     return None
 
 
+#: 递归护栏：方式 1 会把控制权交给 PATH 里的 `frcli`。如果那个 `frcli` 恰好是
+#: **指向本文件的 shim**（历史上有人这么装），就会 run.py → shim → run.py → … 无限自我复制
+#: （2026-09 实测：1600+ 个 Python 进程链式繁殖，机器被拖死，只能反复 pkill -9）。
+#: 所以进入方式 1 前打一个环境标记；嵌套进来的 run.py 看到标记就跳过方式 1。
+_ENV_DEPTH = "FRCLI_RUNPY_DEPTH"
+_MAX_DEPTH = 3
+
+
 def _run_direct(args: list[str]) -> int | None:
-    """方式 1: 直接调用 PATH 中的 frcli 命令。找不到返回 None。"""
+    """方式 1: 直接调用 PATH 中的 frcli 命令。找不到/怀疑递归时返回 None。"""
+    depth = int(os.environ.get(_ENV_DEPTH, "0") or "0")
+    if depth >= 1:
+        # 已经在 run.py 的调用链里了：PATH 里的 frcli 很可能又指回本文件 -> 不碰方式 1
+        return None
     exe = shutil.which("frcli")
     if not exe:
         return None
-    return subprocess.call([exe, *args])
+    # 再兜一层：解析软链后若就是本文件（或本 skill 的 run.py），直接不做方式 1
+    try:
+        real = os.path.realpath(exe)
+    except OSError:
+        real = exe
+    if os.path.realpath(__file__) == real:
+        return None
+    if real.endswith(os.sep + "run.py") and str(SKILL_BASE) in real:
+        return None
+    env = dict(os.environ)
+    env[_ENV_DEPTH] = str(depth + 1)
+    if depth + 1 > _MAX_DEPTH:
+        print(f"frcli 启动器递归过深（{depth + 1} 层），已中止；"
+              f"检查 PATH 里的 frcli 是否指向 {__file__}", file=sys.stderr)
+        return 127
+    return subprocess.call([exe, *args], env=env)
 
 
 def _run_src_module(args: list[str]) -> int | None:
@@ -100,7 +127,9 @@ def _run_src_module(args: list[str]) -> int | None:
     return subprocess.call(
         [python, "-m", "frcli", *args],
         env=env,
-        cwd=str(SRC_DIR),
+        # ⚠ 不要改 cwd：`-m frcli` 靠 PYTHONPATH 就能解析，而传 cwd=SRC_DIR 会把
+        # 用户的**相对路径参数**（`-o out.xlsx`、`report upload x.cpt`）解析到 skill 源码目录 ——
+        # 实测：从 /tmp 跑 `export -o relout.xlsx`，文件落在了 <skill>/src/ 下（静默写错地方）。
     )
 
 
