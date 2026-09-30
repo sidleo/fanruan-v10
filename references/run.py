@@ -149,12 +149,18 @@ def _ensure_symlink() -> None:
     try:
         if not SHIM.is_file():
             return
-        for d in os.environ.get("PATH", "").split(os.pathsep):
-            if not d:
+        # ⚠ 只往**标准用户级目录**建链。早先按 PATH 顺序找"第一个可写的目录"，
+        # 结果写进了别的工具自己的目录（实测建到 `~/.omlx/bin`、`~/.bun/bin` 这类地方）——
+        # 那是人家的地盘，既容易被对方清掉，也是越界。
+        candidates = [Path.home() / ".local" / "bin", Path.home() / "bin"]
+        for d in [str(x) for x in candidates]:
+            if d.startswith(_SKIP_PREFIXES):
                 continue
-            d = os.path.expanduser(d)
-            if d.startswith(_SKIP_PREFIXES) or not os.path.isdir(d):
-                continue
+            if not os.path.isdir(d):
+                try:
+                    os.makedirs(d, exist_ok=True)      # 这两个是约定俗成的用户 bin 目录
+                except OSError:
+                    continue
             target = os.path.join(d, "frcli")
             if os.path.lexists(target):
                 try:

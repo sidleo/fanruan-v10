@@ -84,3 +84,15 @@ def test_runpy_detects_path_shim_pointing_to_itself():
     src = (ROOT / "references" / "run.py").read_text(encoding="utf-8")
     assert "_warn_if_path_shim_points_to_runpy" in src
     assert "递归风险" in src
+
+
+def test_symlink_only_in_standard_user_dirs():
+    """`_ensure_symlink` 只能往 ~/.local/bin 与 ~/bin 建链。
+
+    早先按 PATH 顺序找"第一个可写目录"，实测写进了**别的工具自己的目录**
+    （`~/.omlx/bin`、`~/.bun/bin` 这类）—— 越界，且容易被对方清掉。
+    """
+    src = (ROOT / "references" / "run.py").read_text(encoding="utf-8")
+    assert 'Path.home() / ".local" / "bin"' in src and 'Path.home() / "bin"' in src
+    assert 'for d in os.environ.get("PATH", "").split(os.pathsep):' not in src, \
+        "不该再按 PATH 顺序挑目录"
