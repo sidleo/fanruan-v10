@@ -64,3 +64,16 @@ def test_plan_sheet_list_is_readonly():
     t = _tpl()
     out, ch = reportops.plan_sheet(t, "list")
     assert out == t and ch[0]["kind"] == "sheet.list" and ch[0]["sheets"] == ["sheet1"]
+
+
+def test_docs_warn_against_pointing_path_shim_at_runpy():
+    """run.py 会 which(frcli) 再调用它 —— PATH 里的 frcli 指回 run.py 就是无限递归。
+
+    这个坑真实发生过（有人很自然地写了 `exec python3 .../run.py "$@"`），
+    所以 run.py 头部与 install.md 都必须显式警告。
+    """
+    runpy = (ROOT / "references" / "run.py").read_text(encoding="utf-8")
+    assert "不要把 PATH 里的 `frcli` 指向本文件" in runpy
+    inst = (ROOT / "references" / "install.md").read_text(encoding="utf-8")
+    assert "不要指向 `references/run.py`" in inst
+    assert "references/frcli" in inst

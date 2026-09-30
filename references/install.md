@@ -54,6 +54,20 @@ python <base>/references/run.py server list
 
 > 若建链失败（Windows 无 symlink 权限 / 目录只读），run.py 静默跳过，继续用 `python run.py` 即可，功能不受影响。
 
+> ⚠️ **手建软链/包装时，目标必须是 `references/frcli`，不要指向 `references/run.py`。**
+> run.py 会先 `which frcli` 再调用它，若 PATH 首位那个 `frcli` 又指向 run.py，就无限自我复制
+> （2026-09 实测：1600+ 进程）。run.py 现有护栏兜底，但别依赖它。
+>
+> ```bash
+> # ✅ 对
+> printf '#!/bin/sh\nexec python3 "%s/references/frcli" "$@"\n' "$SKILL" > ~/.local/bin/frcli
+> # 或直接建软链
+> ln -sf "$SKILL/references/frcli" ~/.local/bin/frcli
+>
+> # ❌ 错（指向 run.py → 可能递归）
+> printf '#!/bin/sh\nexec python3 "%s/references/run.py" "$@"\n' "$SKILL" > ~/.local/bin/frcli
+> ```
+
 ### 软链自愈 + 版本一致性（skill 更新后自动切到新代码）
 
 `run.py` 每次运行时还会做两件事，保证不会无感知用旧代码：

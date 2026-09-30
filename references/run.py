@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """frcli 跨平台启动器（Windows / macOS / Linux 通用）。
 
+⚠️ **不要把 PATH 里的 `frcli` 指向本文件** —— 请指向 `references/frcli`。
+   本脚本的"方式 1"是 `shutil.which("frcli")` 后调用它；若 PATH 首位那个 `frcli`
+   恰好是指向本文件的包装（很自然的手写方式：`exec python3 .../run.py "$@"`），
+   就形成 `run.py → which(frcli) → 包装 → run.py → …` **无限自我复制**
+   （2026-09 实测：1600+ 进程，`fork: Resource temporarily unavailable`）。
+   本文件已加三道护栏（环境标记 / 自指检测 / 深度上限）兜底，但正确做法是别这么指。
+
 用途:
   fanruan_v10 skill 内置源码的零安装执行入口。无论 `frcli` 命令是否已安装、
   是否在 PATH 中, 都可以用本脚本启动:
