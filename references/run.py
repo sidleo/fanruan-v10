@@ -169,30 +169,51 @@ def _ensure_symlink() -> None:
         pass  # 建链失败不致命
 
 
+def _version_of(skill_base: Path) -> str | None:
+    init = skill_base / "src" / "frcli" / "__init__.py"
+    if not init.is_file():
+        return None
+    for line in init.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("__version__"):
+            return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return None
+
+
 def _check_version_consistency() -> None:
-    """若 PATH 中的 frcli 来自其他安装(pip/别的 skill 副本), 提示来源与内置版本。仅提示。"""
+    """PATH 里的 frcli 用的是**别的版本**时才提示。
+
+    ⚠ 判据是**版本号**，不是路径。同一台机器上常有多份 skill 副本
+    （项目仓库 + `~/.agents/skills` 安装态），路径必然不同而版本相同 ——
+    早先按路径比对，导致**每条命令都**往 stderr 打两行提示，污染 agent 输出；
+    2026-09 实测（另一个会话的输出里贴了几十次）。
+    """
     try:
         exe = shutil.which("frcli")
         if not exe:
             return
-        if os.path.islink(exe):
-            try:
-                if Path(os.readlink(exe)).resolve() == SHIM.resolve():
-                    return  # 用的就是本 skill 源码
-            except OSError:
-                pass
-        init = SRC_DIR / "frcli" / "__init__.py"
-        ver = "?"
-        if init.is_file():
-            for line in init.read_text(encoding="utf-8").splitlines():
-                if line.strip().startswith("__version__"):
-                    ver = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-        print(f"[fanruan_v10] 当前 PATH 中的 frcli 来自: {exe}", file=sys.stderr)
-        print(
-            f"[fanruan_v10] 本 skill 内置源码版本: {ver}（如需用本版本请重建软链/重装）",
-            file=sys.stderr,
-        )
+        mine = _version_of(SKILL_BASE)
+        # 顺着软链找到"那一份 skill"的根，读它的版本
+        target = Path(exe)
+        try:
+            if target.is_symlink():
+                target = Path(os.readlink(exe))
+                if not target.is_absolute():
+                    target = Path(exe).parent / target
+            target = target.resolve()
+        except OSError:
+            return
+        other = None
+        if target.name == "frcli" and target.parent.name == "references":
+            other = _version_of(target.parent.parent)
+        if other is None:
+            # 不是本 skill 的 shim（pip 安装 / 别家的 frcli）：只在版本不同或未知时提示
+            if mine is None:
+                return
+            print(f"[fanruan_v10] PATH 中的 frcli 不是本 skill 的入口: {exe}", file=sys.stderr)
+            return
+        if other != mine:
+            print(f"[fanruan_v10] PATH 中的 frcli 是另一个版本: {exe} → v{other}"
+                  f"（本 skill 内置 v{mine}）", file=sys.stderr)
     except Exception:
         pass
 

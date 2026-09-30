@@ -154,6 +154,15 @@ def export_batch(manifest_path, instance):
         format: pdf
         output: ./out/report1.pdf
         params: {date: "2024-01-01"}
+
+    **参数矩阵**：`params` 里给**列表**，就逐值各导一份；`output` 用 `{参数名}` 占位区分文件名：
+
+    \b
+    reports:
+      - path: 示例目录/sales_monthly.cpt
+        format: excel
+        output: ./out/复盘_{edate}.xlsx
+        params: {edate: ["20260430", "20260531", "20260630"]}
     """
     try:
         with open(manifest_path, "r", encoding="utf-8") as f:
@@ -170,13 +179,29 @@ def export_batch(manifest_path, instance):
     results = []
     errors_list = []
 
+    # 参数矩阵展开：某个参数给了列表 → 该报表按每个取值各导一份
+    jobs = []
+    for i, item in enumerate(reports):
+        params = item.get("params", {}) or {}
+        keys = [k for k, v in params.items() if isinstance(v, list)]
+        if not keys:
+            jobs.append((i, item, params))
+            continue
+        import itertools
+        for combo in itertools.product(*[params[k] for k in keys]):
+            one = dict(params)
+            one.update(dict(zip(keys, combo)))
+            jobs.append((i, item, one))
+
     client = get_client(instance)
     with client:
-        for i, item in enumerate(reports):
+        for i, item, params in jobs:
             report_path = item.get("path")
             format = item.get("format", "pdf")
             output = item.get("output", f"export_{i}.{format}")
-            params = item.get("params", {})
+            # `{参数名}` 占位 → 换成本次取值，区分同名产物
+            for k, v in params.items():
+                output = output.replace("{" + k + "}", str(v))
 
             try:
                 result = client.export_report(report_path, format, output, params)

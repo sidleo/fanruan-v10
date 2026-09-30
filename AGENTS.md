@@ -239,6 +239,15 @@ fanruan_v10/
 配套：`--num-format/--bold/--bg` 这类"造样式"的选项先**复用等价样式**（归一化 XML 比对），
 否则反复跑会让 `<StyleList>` 无限膨胀（修复前实测 5→6→7→8），幂等性也无从谈起。
 
+### 版本提示噪音 / PATH 里的 frcli 该指向谁（2026-09 两个会话）
+
+- **`~/.local/bin/frcli`（或任何 PATH 里的 `frcli`）要指向 `references/frcli`，不要指向 `references/run.py`** ——
+  run.py 会 `shutil.which("frcli")` 再调回来；PATH 首位若是它自己，就是递归（见下条）。
+- **版本提示按版本号比对，不按路径**：同机常有多份 skill 副本（项目仓库 + `~/.agents/skills` 安装态），
+  路径必然不同而版本相同。早期按路径比对 ⇒ **每条命令都往 stderr 打两行**，
+  实测把一个会话的几十条命令输出全污染了。现在只有**版本真的不同**才提示。
+- 本机 `~/.local/bin/frcli` 曾经就是指向 run.py 的 87 字节 shim（递归风暴的地雷），已改指 `references/frcli`。
+
 ### 启动器三坑：无限自我复制 / 改 cwd / 报 JSONDecodeError 原文（2026-09 学自另一会话）
 
 | 坑 | 症状 | 处置 |

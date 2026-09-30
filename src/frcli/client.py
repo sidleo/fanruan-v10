@@ -51,6 +51,22 @@ def _is_auth_failure(resp: httpx.Response) -> bool:
     return False
 
 
+def _net_hint(e: Exception) -> str:
+    """网络类异常的**可操作**提示。
+
+    默认超时 30s 对真实报表偏短（复杂模板实测要 300~900s），而这个报错原文只有
+    `The read operation timed out`，看不出"只是超时、调大就行" —— 2026-09 两个会话
+    都在这里反复试参数、怀疑报表有问题。所以直接把当前值与调法写进消息。
+    """
+    cur = os.environ.get("FRCLI_TIMEOUT", "30.0")
+    text = str(e)
+    if isinstance(e, httpx.TimeoutException) or "timed out" in text.lower():
+        return (f"{text}（当前超时 {cur}s；复杂报表属正常，用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，"
+                f"不要先怀疑报表或改参数）")
+    return (f"{text}（当前超时 {cur}s；若为连接类问题先 `frcli server test` 确认会话，"
+            f"必要时 `FRCLI_TIMEOUT=600` 调大重试）")
+
+
 _HTML_ERROR_MSG = re.compile(
     r"""id=["'](detail-message|simple-message)["'][^>]*>(.*?)</div>""", re.S)
 
@@ -176,7 +192,7 @@ class FineReportClient:
         try:
             resp = self._http.request(method, path, **kwargs)
         except httpx.RequestError as e:
-            raise ConnectionError(f"请求失败: {e}")
+            raise ConnectionError(f"请求失败: {_net_hint(e)}")
 
         if _is_auth_failure(resp):
             self._authenticated = False
@@ -189,7 +205,7 @@ class FineReportClient:
             try:
                 resp = self._http.request(method, path, **kwargs)
             except httpx.RequestError as e:
-                raise ConnectionError(f"请求失败: {e}")
+                raise ConnectionError(f"请求失败: {_net_hint(e)}")
             if _is_auth_failure(resp):
                 raise AuthError(f"认证失败: 重新登录后仍被重定向到登录页 (HTTP {resp.status_code})")
 
@@ -244,7 +260,7 @@ class FineReportClient:
         try:
             resp = self._request("GET", export_url, params=request_params)
         except httpx.RequestError as e:
-            raise ConnectionError(f"导出请求失败: {e}")
+            raise ConnectionError(f"导出请求失败: {_net_hint(e)}")
 
         if resp.status_code != 200:
             raise ExportError(f"导出失败: HTTP {resp.status_code}")

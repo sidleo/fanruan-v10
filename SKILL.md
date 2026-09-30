@@ -686,6 +686,35 @@ frcli report cell "$R" --at D2 --set-ds-mode list --apply      # 改已有格的
   "标签不在 ≠ 设置没有"的又一例；但上面实测说明它不影响分页重复行为。
 
 
+### 6.19b 批量导出支持「参数矩阵」（一个模板 × 多组参数 → 多份文件）
+
+`export batch` 的 manifest 里，`params` 给**列表**就逐值各导一份；`output` 用 `{参数名}` 占位区分文件名：
+
+```yaml
+reports:
+  - path: 示例目录/sales_monthly.cpt
+    format: excel
+    output: ./out/复盘_{edate}.xlsx
+    params: {edate: ["20260430", "20260531", "20260630"]}
+```
+
+```bash
+frcli export batch ./manifest.yaml     # → 复盘_20260430.xlsx / _20260531.xlsx / _20260630.xlsx
+```
+
+实测：3 个月末各出一份，且每份内容里的 `$edate` 各自替换正确（`日期:20260430` / `0531` / `0630`）。
+**注意**：单元格里引用参数要写 **`$edate`（公式）**，`${edate}` 只在**数据集 SQL** 里替换。
+
+### 6.19c 超时/连接失败会直接告诉你调 `FRCLI_TIMEOUT`
+
+默认 30s 对真实报表偏短，而报错原文只有 `The read operation timed out` —— 容易误判成"报表坏了"。
+现在这类错误会带上当前超时值与调法：
+
+```
+导出请求失败: The read operation timed out（当前超时 30.0s；复杂报表属正常，
+用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，不要先怀疑报表或改参数）
+```
+
 ### 6.20 工作簿 sheet 管理：`report sheet`
 
 `frcli report sheet <模板> --list | --add 名 [--clone-from 名] | --rename 旧 新 | --remove 名`
