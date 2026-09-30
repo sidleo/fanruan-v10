@@ -77,3 +77,10 @@ def test_docs_warn_against_pointing_path_shim_at_runpy():
     inst = (ROOT / "references" / "install.md").read_text(encoding="utf-8")
     assert "不要指向 `references/run.py`" in inst
     assert "references/frcli" in inst
+
+
+def test_runpy_detects_path_shim_pointing_to_itself():
+    """PATH 里的 frcli 若是**真实文件**且指向 run.py，要提示（skill 有意不覆盖真实文件）。"""
+    src = (ROOT / "references" / "run.py").read_text(encoding="utf-8")
+    assert "_warn_if_path_shim_points_to_runpy" in src
+    assert "递归风险" in src

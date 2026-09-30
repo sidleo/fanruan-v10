@@ -176,6 +176,31 @@ def _ensure_symlink() -> None:
         pass  # 建链失败不致命
 
 
+def _warn_if_path_shim_points_to_runpy() -> None:
+    """PATH 里的 `frcli` 若是**真实文件**且内容指向 run.py，警告一次。
+
+    `_ensure_symlink` 有意不覆盖真实文件（不擅自动用户的东西），所以这种手写包装
+    skill 无法自愈 —— 但它正是递归地雷（run.py 会 which(frcli) 再调回来）。
+    这里只提示，不改文件。
+    """
+    try:
+        exe = shutil.which("frcli")
+        if not exe or os.path.islink(exe):
+            return
+        head = Path(exe).read_text(encoding="utf-8", errors="replace")[:2000]
+        if "run.py" not in head:
+            return
+        print(
+            f"[fanruan_v10] ⚠ {exe} 是指向 run.py 的包装脚本 —— 这是**递归风险**\n"
+            f"  （run.py 会 shutil.which('frcli') 再调用它；PATH 首位若是它即无限自我复制）。\n"
+            f"  建议改成指向 references/frcli：\n"
+            f"    printf '#!/bin/sh\\nexec python3 \"{SKILL_BASE}/references/frcli\" \"$@\"\\n' > {exe}",
+            file=sys.stderr,
+        )
+    except Exception:
+        pass
+
+
 def _version_of(skill_base: Path) -> str | None:
     init = skill_base / "src" / "frcli" / "__init__.py"
     if not init.is_file():
@@ -227,6 +252,7 @@ def _check_version_consistency() -> None:
 
 def main() -> int:
     args = sys.argv[1:]
+    _warn_if_path_shim_points_to_runpy()
     code = _run_direct(args)
     if code is not None:
         _check_version_consistency()
