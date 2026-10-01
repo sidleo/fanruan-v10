@@ -486,10 +486,10 @@ def _lock_with_wait(s, remote: str):
                     "   → 在设计器里关闭该模板（或退出设计器）后重试即可，锁随那个会话释放。\n"
                     "其次：别的会话正在写同一文件（普通竞争几秒就过，本命令已自动重试）。\n"
                     "   → 自动化里可设 `FRCLI_WAIT_LOCK=60` 让它继续轮询等待。\n"
-                    "若是**强杀客户端**留下的锁（Ctrl-C/`timeout` 已能自动释放，SIGKILL 不能）：\n"
-                    "   → 这种锁同一账号的新会话也解不开（实测 closeAndFreeFile/userOut/userIn 从别的\n"
-                    "     会话调用都返回 true 但锁仍在），只能等它超时，或先把结果传到**新文件名**\n"
-                    "     （如 xxxV2.cpt）绕过，等释放后再覆盖。"
+                    "若是**强杀客户端**（kill -9）留下的锁：Ctrl-C 与 `timeout`（SIGINT/SIGTERM）本工具\n"
+                    "   会自动释放，SIGKILL 不能 —— 这种锁**当场解不开**（实测 closeAndFreeFile/userOut/\n"
+                    "   userIn 从别的会话调用都返回 true 但锁仍在），但**会自己超时释放（实测约半小时）**。\n"
+                    "   → 期间可先把结果传到**新文件名**（如 xxxV2.cpt）绕过，等释放后再覆盖。"
                 ) from e
             time.sleep(wait)
 
