@@ -30,7 +30,19 @@ SESSIONS = pathlib.Path("~/.dsh/sessions").expanduser()
 #: 「真的调用了 frcli」——只认命令行里跑 frcli / python -m frcli。
 #: ⚠ 不要用宽泛的「提到帆软就算」：wiki 检索结果里满是帆软词条，
 #: 那样每个搜过知识库的会话都会被算进来，报错区全是知识库正文（实测噪音极大）。
-CALL = re.compile(r"\bfrcli\b|python3?\s+-m\s+frcli|references/frcli|references/run\.py", re.I)
+#: 「真的执行了 frcli」判据 —— 只认**命令位**上的 frcli，不认"提到"。
+#: 反复踩过两次假阳性（2026-10 用标准答案测出来的）：
+#:   ① `references/run.py` 单独出现 → yh-bigdata 用同样的启动器结构，整批误报；
+#:   ② `\bfrcli\b` 太宽 → `ls .../skills/frcli/`、JS 代码里出现 "frcli"、`grep frcli` 全被算成使用。
+#: 允许命令位前有 `VAR=VAL` 赋值（如 `FRCLI_TIMEOUT=600 frcli …`）与 `env`。
+CALL = re.compile(
+    r"(?:^|[\n;|&(]|\$\()\s*"                    # 命令位：行首 / ; | && || ( 或 $( 
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+|env\s+(?:\S+=\S*\s+)*)*"   # 前置赋值 / env
+    r"frcli\b"
+    r"|python3?\s+-\s*m\s+frcli"                   # python -m frcli
+    r"|fanruan[-_]v10/references/(?:frcli|run\.py)",  # 直接跑本 skill 的入口
+    re.I | re.M,
+)
 
 #: frcli 自己的报错特征（用于给结果定责）
 FRCLI_ERR = re.compile(
@@ -63,7 +75,10 @@ def ts(rec: dict):
 
 
 def iter_sessions():
-    for f in SESSIONS.rglob("session.v4.jsonl.zstd"):
+    # ⚠ 会话文件有**三种命名**（实测：session.jsonl.zstd 413 个 / session.v3.jsonl.zstd 220 /
+    # session.v4.jsonl.zstd 199）。只匹配 v4 会漏掉 **76%** 的会话 —— 实测漏掉了
+    # 两个真的用过 frcli 的会话（它们是 v3）。所以按通配匹配所有版本。
+    for f in SESSIONS.rglob("session*.jsonl.zstd"):
         try:
             yield f, dt.datetime.fromtimestamp(f.stat().st_mtime)
         except OSError:
