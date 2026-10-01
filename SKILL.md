@@ -715,6 +715,25 @@ frcli export batch ./manifest.yaml     # → 复盘_20260430.xlsx / _20260531.xl
 用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，不要先怀疑报表或改参数）
 ```
 
+### 6.19d 模板被锁（`TplLockedException`）：最常见原因是**设计器开着那个文件**
+
+写入走"占锁 → 写 → 释放"（`readAndLockFile` / `closeAndFreeFile`）。被锁住时报：
+
+```
+模板被锁，写不进去：<path>
+**最可能的原因：有人在 FineReport 设计器里正开着这个模板**（很可能是你自己）。
+   → 在设计器里关闭该模板（或退出设计器）后重试即可，锁随那个会话释放。
+```
+
+要点：
+- **本工具无法跨会话解锁**。实测从另一个会话调 `closeAndFreeFile` / `userOut` / `userIn`
+  都**返回 `true` 但锁仍在** —— 别被这类"成功"返回值误导。
+- **已自动重试**：普通并发竞争会重试 3 次（约 5s）再报错；自动化里可设
+  **`FRCLI_WAIT_LOCK=60`** 继续轮询等待（适合"等对方关掉设计器"）。
+- **强杀客户端会留锁**：`Ctrl-C` / `timeout`（SIGINT/SIGTERM）时本工具会自动释放占着的锁；
+  **`kill -9`（SIGKILL）无法捕获** → 锁留在服务端，同账号新会话也解不开，只能等超时或换文件名。
+- 被锁时想继续干活：先把结果传到**新文件名**（如 `xxxV2.cpt`）绕过，等释放后再覆盖。
+
 ### 6.20 工作簿 sheet 管理：`report sheet`
 
 `frcli report sheet <模板> --list | --add 名 [--clone-from 名] | --rename 旧 新 | --remove 名`

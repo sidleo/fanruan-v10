@@ -239,6 +239,20 @@ fanruan_v10/
 配套：`--num-format/--bold/--bg` 这类"造样式"的选项先**复用等价样式**（归一化 XML 比对），
 否则反复跑会让 `<StyleList>` 无限膨胀（修复前实测 5→6→7→8），幂等性也无从谈起。
 
+### 模板锁：设计器开着文件是最常见原因；强杀客户端会留**解不开**的锁
+
+写入是"占锁 → 写 → 释放"（`TplOperator.readAndLockFile` / `closeAndFreeFile`）。被锁住时：
+
+- **最常见：有人在设计器里开着该模板**（2026-09 实测确认，用户自己开着）→ 关掉即释放。
+- **本工具无法跨会话解锁**：实测从另一会话调 `closeAndFreeFile` / `userOut` / `userIn`
+  都返回 `true` 而锁**仍在** —— 这类"成功"返回值会把人带沟里（那个会话里 `fileLocked` 报 false 却写不进去）。
+- **强杀客户端（SIGKILL）留下的锁，同账号新会话也解不开**（本项目实验：`p.kill()` 掉的进程，
+  其锁 15 分钟后仍锁着；而走 SIGTERM 的对照组锁已正常释放）。
+  ⇒ 已实现：会话登记 `_locked` 集合 + `release_locks()` + `install_lock_guard()`
+  （`atexit` + SIGINT/SIGTERM），CLI 入口自动挂上。
+- **策略**：普通竞争自动重试 3 次（~5s）；`FRCLI_WAIT_LOCK=<秒>` 加长轮询等待；
+  被锁时先把结果传到新文件名（`xxxV2.cpt`）绕过，别干等。
+
 ### 版本提示噪音 / PATH 里的 frcli 该指向谁（2026-09 两个会话）
 
 - **`~/.local/bin/frcli`（或任何 PATH 里的 `frcli`）要指向 `references/frcli`，不要指向 `references/run.py`** ——

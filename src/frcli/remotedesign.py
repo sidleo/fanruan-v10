@@ -143,7 +143,17 @@ def _client(base_url: str, timeout: float) -> httpx.Client:
 
 
 class RemoteDesignSession:
-    """一次远程设计会话：握手 → 取 token → 走 channel 调服务端 RPC。"""
+    """一次远程设计会话：握手 → 取 token → 走 channel 调服务端 RPC。
+
+    ⚠ **锁是会话级的，且客户端被中断会留下锁**：`readAndLockFile` 占的锁若不
+    `closeAndFreeFile`，服务端会一直拒绝对该文件的写入 —— 而**别的会话解不开它**
+    （实测 `closeAndFreeFile` / `userOut` / `userIn` 从另一会话调用都返回 true 但锁仍在）。
+    2026-09 有个会话因此写不进、改名不行、删不掉，只能换新文件名上传。
+    所以：本类登记所有未释放的锁，进程退出（含 SIGINT/SIGTERM）时尽力释放。
+    """
+
+    #: 进程内所有还开着的会话（给 atexit / 信号处理用）
+    _OPEN: "set[RemoteDesignSession]" = set()
 
     def __init__(self, config, client_id: str = None):
         self.config = config
@@ -154,16 +164,35 @@ class RemoteDesignSession:
         self.client_id = client_id or f"frcli-{uuid.uuid4()}"
         self.token = None
         self._check = None
+        self._locked: set[str] = set()      # 本会话占着锁、还没释放的远端路径
 
     # -- 生命周期 -----------------------------------------------------------
     def __enter__(self):
+        RemoteDesignSession._OPEN.add(self)
         return self
 
     def __exit__(self, *exc):
         self.close()
 
+    def release_locks(self):
+        """尽力释放本会话占着的锁（进程要退出时也要能调）。"""
+        for path in list(self._locked):
+            try:
+                self.call(TPL_OPERATOR, "closeAndFreeFile", [("java.lang.String", path)])
+                self._locked.discard(path)
+            except Exception:
+                pass
+
     def close(self):
-        self._http.close()
+        try:
+            self.release_locks()
+        except Exception:
+            pass
+        RemoteDesignSession._OPEN.discard(self)
+        try:
+            self._http.close()
+        except Exception:
+            pass
 
     def _post(self, path, **kwargs):
         try:
@@ -270,10 +299,13 @@ class RemoteDesignSession:
     # -- 模板锁（TplOperator）：占用中的模板不要盲写 -------------------------
     def lock(self, path: str) -> bytes:
         """readAndLockFile：返回服务端现有内容并加锁；被别人锁住会报错。"""
-        return self.call(TPL_OPERATOR, "readAndLockFile", [("java.lang.String", path)])
+        data = self.call(TPL_OPERATOR, "readAndLockFile", [("java.lang.String", path)])
+        self._locked.add(path)
+        return data
 
     def unlock(self, path: str):
         self.call(TPL_OPERATOR, "closeAndFreeFile", [("java.lang.String", path)])
+        self._locked.discard(path)
 
     def delete(self, path: str) -> bool:
         """TplOperator.delete：移入回收站（可恢复）。"""
@@ -413,6 +445,90 @@ def assert_template_bytes(data: bytes, allow_format: bool = False):
         raise ApiError(f"内容不是可解析的 XML 文本（{e}），已拒绝写入。")
 
 
+#: 占锁失败(TplLockedException)时的等待策略：先短重试（普通并发几秒就释放），
+#: 再按 FRCLI_WAIT_LOCK 给的长窗口轮询（自动化场景"等对方关掉 Designer"）。
+_LOCK_RETRY_DELAYS = (0.5, 1.5, 3.0)
+_LOCKED_MARK = "TplLockedException"
+
+
+def _is_locked_error(e: Exception) -> bool:
+    return _LOCKED_MARK in str(e)
+
+
+def _lock_with_wait(s, remote: str):
+    """占锁；被锁住时按策略重试/等待，最终仍失败则抛出**可操作**的错误。
+
+    ⚠️ 本工具**无法跨会话解锁**：实测从另一个会话调 `closeAndFreeFile` 会返回 true
+    但锁仍在（2026-09）。所以被别的会话/Designer 锁住时只能等对方释放或换文件名。
+    """
+    import time
+    extra = float(os.environ.get("FRCLI_WAIT_LOCK", "0") or "0")
+    # 基础重试（覆盖普通并发）**始终**给足；FRCLI_WAIT_LOCK 再在此之上加长窗口。
+    # ⚠ 早先把两者揉成一个 deadline，未设该变量时窗口=0，基础重试的等待被全部跳过
+    # （实测 1.6s 就报错，等于没重试）。
+    budget = sum(_LOCK_RETRY_DELAYS) + extra
+    deadline = time.monotonic() + budget
+    delays = list(_LOCK_RETRY_DELAYS)
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return s.lock(remote), attempt
+        except ApiError as e:
+            if not _is_locked_error(e):
+                raise
+            wait = delays.pop(0) if delays else 3.0
+            if time.monotonic() + wait > deadline:
+                raise ApiError(
+                    f"模板被锁，写不进去：{remote}\n"
+                    f"平台原文: Fine-Engine_Remote_Design_Tpl_Locked（已尝试 {attempt} 次，共等 {int(budget)}s）\n"
+                    "**最可能的原因：有人在 FineReport 设计器里正开着这个模板**（很可能是你自己）。\n"
+                    "   → 在设计器里关闭该模板（或退出设计器）后重试即可，锁随那个会话释放。\n"
+                    "其次：别的会话正在写同一文件（普通竞争几秒就过，本命令已自动重试）。\n"
+                    "   → 自动化里可设 `FRCLI_WAIT_LOCK=60` 让它继续轮询等待。\n"
+                    "若是**强杀客户端**留下的锁（Ctrl-C/`timeout` 已能自动释放，SIGKILL 不能）：\n"
+                    "   → 这种锁同一账号的新会话也解不开（实测 closeAndFreeFile/userOut/userIn 从别的\n"
+                    "     会话调用都返回 true 但锁仍在），只能等它超时，或先把结果传到**新文件名**\n"
+                    "     （如 xxxV2.cpt）绕过，等释放后再覆盖。"
+                ) from e
+            time.sleep(wait)
+
+
+def install_lock_guard() -> None:
+    """进程退出/被中断时释放占着的锁。
+
+    `readAndLockFile` 的锁**只有占锁的那个会话能释放**，客户端一挂锁就留在服务端
+    （实测：被 kill 的进程留下的锁，别的会话用 closeAndFreeFile/userOut/userIn 都解不开）。
+    所以必须在 SIGINT(Ctrl-C) / SIGTERM(`timeout` 命令、进程管理器) 时主动释放。
+    SIGKILL 无法捕获 —— 那种情况只能等对方释放或换文件名。
+    """
+    import atexit
+    import signal
+
+    def _release_all() -> None:
+        for sess in list(RemoteDesignSession._OPEN):
+            try:
+                sess.release_locks()
+            except Exception:
+                pass
+
+    atexit.register(_release_all)
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            prev = signal.getsignal(sig)
+
+            def _handler(signum, frame, _prev=prev):
+                _release_all()
+                if callable(_prev) and _prev not in (signal.SIG_DFL, signal.SIG_IGN):
+                    return _prev(signum, frame)
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
+
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass       # 非主线程 / 平台不支持
+
+
 def upload_template(config, local_file: str, remote_path: str, force: bool = False,
                     allow_format: bool = False) -> dict:
     """把本地模板写到服务端（远程设计通道）。
@@ -442,7 +558,9 @@ def upload_template(config, local_file: str, remote_path: str, force: bool = Fal
         result["overwritten"] = exists
         locked = False
         if exists:
-            current = s.lock(remote)          # 被其他 Designer 锁住 → 这里直接抛错
+            current, _tries = _lock_with_wait(s, remote)   # 被锁住会重试/等待，最终抛可操作的错
+            if _tries > 1:
+                result["lock_attempts"] = _tries
             locked = True
             result["backup"] = _save_backup(remote, current)
             result["previous_sha256"] = _sha256(current)
@@ -454,10 +572,16 @@ def upload_template(config, local_file: str, remote_path: str, force: bool = Fal
             s.write(remote, data)
         finally:
             if locked:
-                try:
-                    s.unlock(remote)
-                except Exception:
-                    pass
+                # 解锁失败**不能静默**：锁留在服务端会让后续写入一直被拒
+                for _ in range(2):
+                    try:
+                        s.unlock(remote)
+                        break
+                    except Exception as e:      # noqa: PERF203
+                        last = e
+                else:
+                    result["warning"] = (f"占的锁可能没释放（{last}）——"
+                                         f"后续写入 {remote} 可能被拒；让对方关掉 Designer 或稍后重试")
         back = s.read(remote)
         if _sha256(back) != _sha256(data):
             raise ApiError(

@@ -20,6 +20,12 @@ from .commands.rpc import rpc_group
 @click.option("-v", "--verbose", is_flag=True, help="详细输出")
 @click.pass_context
 def main(ctx, instance, verbose):
+    # 进程被 Ctrl-C / SIGTERM 时释放远程设计占的锁（否则模板会被锁死）
+    try:
+        from .remotedesign import install_lock_guard
+        install_lock_guard()
+    except Exception:
+        pass
     """frcli - FineReport CLI 工具
 
     让 agent 通过命令行与 FineReport 服务器交互。
