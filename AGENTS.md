@@ -102,6 +102,7 @@ fanruan_v10/
 | 装 | `pip install -e .`（本目录，editable，改完即生效） |
 | 测 | `frcli --help` → 命令组 `--help` → 单条**只读**命令实测；`python -m pytest tests/` |
 | 记 | 命令增删改同步 `SKILL.md` + `README.md`；新坑点写进 SKILL.md §6 与本文「实测坑点」 |
+| 巡 | `~/frre/venv/bin/python tools/scan_sessions.py [--date D / --days N]` —— 扫 DSH 会话里 frcli 的使用痕迹（用户诉求 + 报错），产出优化线索。**默认扫昨天**；每天 0 点有定时任务自动跑一轮（验证后再改，见下） |
 
 版本号三处保持一致：`src/frcli/__init__.py` 的 `__version__`、`pyproject.toml` 的 `version`、`SKILL.md` front-matter 的 `version`。
 

@@ -715,6 +715,12 @@ frcli export batch ./manifest.yaml     # → 复盘_20260430.xlsx / _20260531.xl
 用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，不要先怀疑报表或改参数）
 ```
 
+### 6.19c0 会话巡检工具（`tools/scan_sessions.py`）
+
+扫 `~/.dsh/sessions` 里**与本技能相关**的会话（只认真的调用过 `frcli` 的），列出用户诉求（⚠ 标记抱怨/纠正）与 frcli 调用的报错片段，用于找优化点。
+`--date YYYY-MM-DD` / `--days N` / `--all` / `--json`；默认扫昨天。
+按**记录时间戳**切窗口（会话会跨天延续，按文件 mtime 会漏）。
+
 ### 6.19d 模板被锁（`TplLockedException`）：最常见原因是**设计器开着那个文件**
 
 写入走"占锁 → 写 → 释放"（`readAndLockFile` / `closeAndFreeFile`）。被锁住时报：
