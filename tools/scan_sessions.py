@@ -27,9 +27,6 @@ import sys
 
 SESSIONS = pathlib.Path("~/.dsh/sessions").expanduser()
 
-#: 「真的调用了 frcli」——只认命令行里跑 frcli / python -m frcli。
-#: ⚠ 不要用宽泛的「提到帆软就算」：wiki 检索结果里满是帆软词条，
-#: 那样每个搜过知识库的会话都会被算进来，报错区全是知识库正文（实测噪音极大）。
 #: 「真的执行了 frcli」判据 —— 只认**命令位**上的 frcli，不认"提到"。
 #: 反复踩过两次假阳性（2026-10 用标准答案测出来的）：
 #:   ① `references/run.py` 单独出现 → yh-bigdata 用同样的启动器结构，整批误报；
@@ -44,17 +41,29 @@ CALL = re.compile(
     re.I | re.M,
 )
 
-#: frcli 自己的报错特征（用于给结果定责）
-FRCLI_ERR = re.compile(
-    r"EXPORT_ERROR|CONNECTION_ERROR|API_ERROR|AUTH_ERROR|远程设计 RPC|TplLocked"
-    r"|导出产物是平台出错页|FRCLI_TIMEOUT|read operation timed out|fine-.*error", re.I)
-
-#: 报错/异常信号（用于挑「值得优化」的点）
+#: 通用报错/异常信号（**只在 frcli 调用的结果里**用来兜底找错，见 scan()）
 ERR = re.compile(
-    r'"status":\s*"error"|"code":\s*"(?:API_ERROR|EXPORT_ERROR|CONNECTION_ERROR|AUTH_ERROR|UNKNOWN)"'
-    r"|Traceback|\bError\b:|Exception|timed out|command not found|does not exist"
+    r'"status":\s*"error"|Traceback|\bError\b:|Exception'
+    r"|timed out|command not found|does not exist|No such file"
     r"|无法|失败|超时|被锁",
 )
+
+#: frcli 自己的**报错**特征。⚠ 必须要求"错误形态"，不能只认关键词：
+#: 实测 `frcli --help` 的命令列表里有「rpc  远程设计 RPC 网关（…）」，
+#: 早期只写 `远程设计 RPC` 就把 help 文本误判成报错（2026-10-01 巡检抓到）。
+FRCLI_ERR = re.compile(
+    r'"code":\s*"(?:API_ERROR|EXPORT_ERROR|CONNECTION_ERROR|AUTH_ERROR|UNKNOWN)"'
+    r"|导出产物是平台出错页|导出产物魔数不符"
+    r"|远程设计 RPC \w+ 失败"          # 我们的错误前缀形如「远程设计 RPC readAndLockFile 失败」
+    r"|TplLockedException"
+    r"|read operation timed out"
+    r"|Fine-[A-Za-z_]+(?:No_Privilege|Error_Tip)",
+    re.I,
+)
+
+#: cwd 落在这些目录里 = **本 skill 的维护会话**（我们自己在改它），
+#: 里面的"报错"多是自测输出，报告里单独标注以免当成真实用户问题。
+MAINT_DIRS = ("Project/fanruan_v10", "Project/fanruan/", "Project/yh-skill")
 
 #: 用户在抱怨/纠正的信号（往往是真痛点）
 COMPLAINT = re.compile(
@@ -206,7 +215,8 @@ def main() -> int:
         if not res["frcli_cmds"]:
             continue                     # 没真的调用过 frcli → 与本 skill 无关，跳过
         cwd = next((r.get("cwd") for r in all_rows if r.get("cwd")), "?")
-        report.append({"file": str(f), "cwd": cwd, "records": len(rows), **res})
+        report.append({"file": str(f), "cwd": cwd, "records": len(rows),
+                       "maintenance": any(d in cwd for d in MAINT_DIRS), **res})
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -219,7 +229,8 @@ def main() -> int:
     print(f"# 会话扫描：{len(report)} 个相关会话"
           f"（{lo:%Y-%m-%d} 起）" if lo else f"# 会话扫描：{len(report)} 个相关会话（全部）")
     for s in report:
-        print(f"\n## {pathlib.Path(s['file']).parent.name}")
+        tag = "  ⚙️ 本 skill 维护会话（自测输出居多，别当用户问题）" if s.get("maintenance") else ""
+        print(f"\n## {pathlib.Path(s['file']).parent.name}{tag}")
         print(f"   cwd: {s['cwd']}   记录: {s['records']}"
               f"   frcli 调用: {len(s['frcli_cmds'])}   报错片段: {len(s['errors'])}")
         if s["user_msgs"]:

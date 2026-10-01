@@ -40,3 +40,22 @@ def test_windows_filter_uses_record_time_not_file_mtime():
     src = (ROOT / "tools" / "scan_sessions.py").read_text(encoding="utf-8")
     assert "def ts(rec" in src
     assert "按文件 mtime" in src, "应保留这条教训的注释"
+
+
+def test_help_text_is_not_counted_as_error():
+    """`frcli --help` 的命令列表里有「rpc 远程设计 RPC 网关（…）」。
+
+    早期 FRCLI_ERR 只写 `远程设计 RPC` → help 文本被当成报错（2026-10-01 巡检抓到）。
+    必须要求**错误形态**（如「远程设计 RPC xxx 失败」）。
+    """
+    help_text = "  rpc       远程设计 RPC 网关（🟢 只读白名单 / 🔴 写需 --yes）"
+    assert not ss.FRCLI_ERR.search(help_text), "help 文本不该算报错"
+    assert ss.FRCLI_ERR.search('远程设计 RPC readAndLockFile 失败: TplLockedException'), "真错误要认出来"
+    assert ss.FRCLI_ERR.search('"code": "EXPORT_ERROR"')
+    assert ss.FRCLI_ERR.search("导出产物是平台出错页，不是报表: x.xlsx")
+
+
+def test_maintenance_sessions_are_labelled():
+    """cwd 在本 skill 仓库里的会话是我们自己在维护它 —— 要标注，别当用户问题。"""
+    assert "MAINT_DIRS" in (ROOT / "tools" / "scan_sessions.py").read_text(encoding="utf-8")
+    assert any("Project/fanruan_v10" in d for d in ss.MAINT_DIRS)
