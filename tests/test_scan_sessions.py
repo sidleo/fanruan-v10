@@ -59,3 +59,18 @@ def test_maintenance_sessions_are_labelled():
     """cwd 在本 skill 仓库里的会话是我们自己在维护它 —— 要标注，别当用户问题。"""
     assert "MAINT_DIRS" in (ROOT / "tools" / "scan_sessions.py").read_text(encoding="utf-8")
     assert any("Project/fanruan_v10" in d for d in ss.MAINT_DIRS)
+
+
+def test_error_matching_uses_rendered_text_not_json_dump():
+    """报错匹配必须在**实际渲染文本**上做。
+
+    拿 `json.dumps(...)` 整块 JSON 去匹配时，内层引号会被转义成 `\\"`，
+    于是 `"status": "error"` / `"code": "API_ERROR"` 这类**带引号的模式永远匹配不上**
+    （2026-10-03 实测：一次批量里 9 次失败，扫描器却报「0 条报错」）。
+    """
+    src = (ROOT / "tools" / "scan_sessions.py").read_text(encoding="utf-8")
+    assert 'c.get("text")' in src, "结果要取 content 里的 text"
+    assert "results[cid] = body" in src
+    # 带引号的模式必须能匹配**渲染文本**
+    assert ss.ERR.search('{"status": "error", "error": {"code": "API_ERROR"}}')
+    assert ss.FRCLI_ERR.search('{"status": "error", "error": {"code": "API_ERROR"}}')

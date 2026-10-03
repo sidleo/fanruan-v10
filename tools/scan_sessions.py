@@ -155,8 +155,15 @@ def scan(rows: list[dict]) -> dict:
             raw_id = (data.get("toolCallId") or msg.get("toolCallId")
                       or data.get("callId") or (msg.get("source") or {}).get("callId") or "")
             cid = str(raw_id).split("|")[0]
-            blob = json.dumps(data, ensure_ascii=False)
-            results[cid] = blob
+            # ⚠ 要在**实际渲染出来的文本**上匹配，不能拿 `json.dumps(...)` 的整块 JSON：
+            # 序列化后内层引号会变成 `\"`，于是 `"status": "error"` / `"code": "API_ERROR"`
+            # 这类**带引号的模式永远匹配不上**（实测 10 次调用 9 次失败却报 0 条）。
+            texts = []
+            for c in (msg.get("content") or []):
+                if isinstance(c, dict) and isinstance(c.get("text"), str):
+                    texts.append(c["text"])
+            body = "\n".join(texts) if texts else json.dumps(data, ensure_ascii=False)
+            results[cid] = body
 
     # 报错**只取 frcli 调用对应的结果**（否则会把知识库正文、别的工具的报错混进来）
     for cid in frcli_call_ids:
