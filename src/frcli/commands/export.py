@@ -41,6 +41,8 @@ def export_pdf(report_path, output, params, instance):
                 "format": "pdf",
                 "report": report_path,
                 "file": result,
+                # 连接层错误自动重发了几次（只对 GET 生效）——链路抖动时可观测，正常为 0
+                "net_retries": client.net_retries,
             })
     except Exception as e:
         error(e)
@@ -65,6 +67,8 @@ def export_excel(report_path, output, params, instance):
                 "format": "excel",
                 "report": report_path,
                 "file": result,
+                # 连接层错误自动重发了几次（只对 GET 生效）——链路抖动时可观测，正常为 0
+                "net_retries": client.net_retries,
             })
     except Exception as e:
         error(e)
@@ -89,6 +93,8 @@ def export_word(report_path, output, params, instance):
                 "format": "word",
                 "report": report_path,
                 "file": result,
+                # 连接层错误自动重发了几次（只对 GET 生效）——链路抖动时可观测，正常为 0
+                "net_retries": client.net_retries,
             })
     except Exception as e:
         error(e)
@@ -113,6 +119,8 @@ def export_image(report_path, output, params, instance):
                 "format": "image",
                 "report": report_path,
                 "file": result,
+                # 连接层错误自动重发了几次（只对 GET 生效）——链路抖动时可观测，正常为 0
+                "net_retries": client.net_retries,
             })
     except Exception as e:
         error(e)
@@ -137,6 +145,8 @@ def export_csv(report_path, output, params, instance):
                 "format": "csv",
                 "report": report_path,
                 "file": result,
+                # 连接层错误自动重发了几次（只对 GET 生效）——链路抖动时可观测，正常为 0
+                "net_retries": client.net_retries,
             })
     except Exception as e:
         error(e)
@@ -159,9 +169,9 @@ def export_batch(manifest_path, instance):
 
     \b
     reports:
-      - path: 示例目录/sales_monthly.cpt
+      - path: demo_group/demo_user/sales_monthly.cpt
         format: excel
-        output: ./out/复盘_{edate}.xlsx
+        output: ./out/monthly_review_{edate}.xlsx
         params: {edate: ["20260430", "20260531", "20260630"]}
     """
     try:
@@ -178,6 +188,7 @@ def export_batch(manifest_path, instance):
 
     results = []
     errors_list = []
+    warnings_list = []
 
     # 参数矩阵展开：某个参数给了列表 → 该报表按每个取值各导一份
     jobs = []
@@ -187,11 +198,23 @@ def export_batch(manifest_path, instance):
         if not keys:
             jobs.append((i, item, params))
             continue
+        # 空列表不是"没有矩阵"，而是"这一条一个任务都展开不出来"——静默丢报表比报错危险
+        # （实测：total=0 / manifest_reports=1 / exit 0，用户以为跑完了）。
+        empty_keys = [k for k in keys if not params[k]]
+        if empty_keys:
+            error(ExportError(
+                f"manifest 第 {i + 1} 条报表({item.get('path') or '?'})的参数 "
+                f"{', '.join(empty_keys)} 是空列表，展开后没有任何导出任务；"
+                "请至少填一个取值，或删掉该参数"))
+            return
         import itertools
         for combo in itertools.product(*[params[k] for k in keys]):
             one = dict(params)
             one.update(dict(zip(keys, combo)))
             jobs.append((i, item, one))
+
+    seen_outputs = {}
+    warned_outputs = set()
 
     client = get_client(instance)
     with client:
@@ -203,11 +226,25 @@ def export_batch(manifest_path, instance):
             for k, v in params.items():
                 output = output.replace("{" + k + "}", str(v))
 
+            # 多条任务落到同一路径 = 后写的覆盖先写的（多半是 output 漏了占位）
+            if output in seen_outputs:
+                if output not in warned_outputs:
+                    warned_outputs.add(output)
+                    warnings_list.append(
+                        f"输出路径冲突: {output} 被多条任务共用，后写的会覆盖先写的"
+                        "——检查 output 的 {参数名} 占位是否覆盖了所有矩阵参数")
+            else:
+                seen_outputs[output] = i
+
             try:
                 result = client.export_report(report_path, format, output, params)
+                # 参数矩阵下同一报表会有多份产物：每条都带本次 params 与落盘路径，
+                # 否则失败条目只能靠文件 mtime 猜是哪一项（实测踩过）。
                 results.append({
                     "report": report_path,
                     "format": format,
+                    "params": params,
+                    "output": output,
                     "file": result,
                     "status": "ok",
                 })
@@ -215,15 +252,22 @@ def export_batch(manifest_path, instance):
                 errors_list.append({
                     "report": report_path,
                     "format": format,
+                    "params": params,
+                    "output": output,
                     "status": "error",
                     "error": str(e),
                 })
 
     success({
         "action": "batch_export",
-        "total": len(reports),
+        # total 是**展开后**的任务数（参数矩阵会放大）；manifest 条数另给 manifest_reports，
+        # 否则 total=1 而 success+failed=6 这种账对不上（实测踩过）。
+        "total": len(jobs),
+        "manifest_reports": len(reports),
         "success": len(results),
         "failed": len(errors_list),
+        "net_retries": client.net_retries,
+        "warnings": warnings_list,
         "results": results,
         "errors": errors_list,
     })

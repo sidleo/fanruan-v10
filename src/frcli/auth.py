@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional
 from .models import ServerConfig, TokenCache
 from .exceptions import AuthError, ConnectionError
+from .neterr import PROXY_HINT, is_proxy_5xx, is_transport_error, net_hint
 
 
 TOKEN_CACHE_DIR = Path.home() / ".frcli" / "tokens"
@@ -61,6 +62,11 @@ class TokenManager:
             )
 
             if resp.status_code != 200:
+                # 响应型代理指纹（5xx + `Proxy-Status`）与请求跳同一判定：登录这一跳也要说清
+                # 是代理故障，否则只报 "登录失败: HTTP 503"，用户仍看不出断在哪一跳。
+                if is_proxy_5xx(resp):
+                    raise ConnectionError(
+                        f"登录请求失败: HTTP {resp.status_code}{PROXY_HINT}")
                 raise AuthError(f"登录失败: HTTP {resp.status_code}")
 
             # 从响应体获取 token
@@ -90,8 +96,13 @@ class TokenManager:
 
         except AuthError:
             raise
+        except ConnectionError:
+            raise  # 上面按代理指纹抛出的，文案已完整，别被下面再套一层前缀
         except Exception as e:
-            raise ConnectionError(f"登录请求失败: {e}")
+            # 登录这一跳与请求那一跳是同一条链路：传输层错误共用 neterr 的分类文案。
+            # 不给 login 加自动重试 —— 它是 POST，且代理/链路故障通常不是瞬时问题。
+            hint = net_hint(e) if is_transport_error(e) else str(e)
+            raise ConnectionError(f"登录请求失败: {hint}")
 
     def invalidate(self):
         """清除 token（登出时调用）"""

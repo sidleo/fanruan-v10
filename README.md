@@ -138,8 +138,13 @@ frcli attach remove default1789441975426_Olw7l        # 用完清理
 CLI 输出为 JSON（`-f table` 为表格），便于 agent 解析：
 
 ```json
-{"status": "ok", "action": "export", "format": "excel", "report": "...", "file": "/path/to/report.xlsx"}
+{"status": "ok", "action": "export", "format": "excel", "report": "...", "file": "/path/to/report.xlsx", "net_retries": 0}
 ```
+
+`net_retries` 是连接层错误自动重发的次数（只对幂等 GET 生效，正常为 0）。
+`export batch` 的 `results`/`errors` 每条带本次 `params` 与已展开的 `output`；`total` 是**展开后**的任务数（manifest 条数见 `manifest_reports`）。
+`export batch` 另有顶层 `warnings` 数组（正常为 `[]`）：多条任务展开出同一个 `output` 路径时提示会互相覆盖（多半是 `output` 漏了 `{参数名}` 占位）。
+参数矩阵的 `params` 给了**空列表**时，`export batch` 直接报 `EXPORT_ERROR` 并点名是哪个参数（exit 1），不会静默跳过该报表。
 
 错误输出到 stderr：`{"status": "error", "error": {"code": "AUTH_FAILED", "message": "..."}}`
 

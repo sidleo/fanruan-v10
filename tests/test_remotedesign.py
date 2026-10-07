@@ -69,6 +69,7 @@ def test_parse_real_server_response():
 
 
 def test_normalize_report_path():
+    # 覆盖点：路径含 **CJK** 时也要能正确归一化（占位符故意用中文，别换成纯 ASCII）
     assert normalize_report_path("/demo_group/示例用户/示例目录/a.cpt") == \
         "reportlets/demo_group/示例用户/示例目录/a.cpt"
     assert normalize_report_path("reportlets/x/y.cpt") == "reportlets/x/y.cpt"

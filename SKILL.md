@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.2
+version: 0.10.3
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -310,6 +310,17 @@ frcli schedule setting
 出错页的 `detail-message` 是 html 实体编码的**具体报错**（错误代码 + 原始 SQL），解码后可直接定位坏数据集。
 ⚠️ 该属性有**单引号**（`id='detail-message'`）和双引号两种写法，解析要都认（0.6.0 前只认双引号，单引号页会退化成
 「响应不是 JSON」这种没用的提示）。
+
+0.10.3 起 `EXPORT_ERROR` **把平台原文带出来**，不必自己去解 `.bad` 文件（`detail-message` 实测落在 4KB 级页面的后半段，
+只看前 512B 会漏掉）：
+
+```
+导出产物是平台出错页，不是报表: out/review.csv；平台原因: 错误代码:11300002 行高列宽超出页面大小设置；
+该错误码实测为宽表/大行高超出分页导出的页面设置所致，加 `--params '{"extype":"simple"}'` 改原样导出后重试；
+坏产物已改名保留在 out/review.csv.bad
+```
+
+`detail-message` 为空时退到 `simple-message` 的本地化 key 再翻成人话（与 `_unwrap_json` 同一口径）。
 
 ### 6.2 默认 30s 超时，复杂报表必然超时
 
@@ -692,28 +703,53 @@ frcli report cell "$R" --at D2 --set-ds-mode list --apply      # 改已有格的
 
 ```yaml
 reports:
-  - path: 示例目录/sales_monthly.cpt
+  - path: demo_group/demo_user/sales_monthly.cpt
     format: excel
-    output: ./out/复盘_{edate}.xlsx
+    output: ./out/monthly_review_{edate}.xlsx
     params: {edate: ["20260430", "20260531", "20260630"]}
 ```
 
 ```bash
-frcli export batch ./manifest.yaml     # → 复盘_20260430.xlsx / _20260531.xlsx / _20260630.xlsx
+frcli export batch ./manifest.yaml     # → monthly_review_20260430.xlsx / _20260531.xlsx / _20260630.xlsx
 ```
 
 实测：3 个月末各出一份，且每份内容里的 `$edate` 各自替换正确（`日期:20260430` / `0531` / `0630`）。
 **注意**：单元格里引用参数要写 **`$edate`（公式）**，`${edate}` 只在**数据集 SQL** 里替换。
 
-### 6.19c 超时/连接失败会直接告诉你调 `FRCLI_TIMEOUT`
+每条 `results`/`errors` 都带本次 **`params` 与 `output`**（`{参数名}` 已展开），失败条目因此能直接定位到是哪一项 ——
+旧版错误条目只有 `report/format/error`，同一报表的多组参数失败时两条文案一模一样，只能靠文件 mtime 猜。
+`total` 是**展开后**的任务数，manifest 条数看 `manifest_reports`（旧版 `total` 用 manifest 条数，
+参数矩阵下会出现 `total:1` 而 `success+failed:6` 这种对不上的账）。
 
-默认 30s 对真实报表偏短，而报错原文只有 `The read operation timed out` —— 容易误判成"报表坏了"。
-现在这类错误会带上当前超时值与调法：
+两个边界（0.10.3 起）：`params` 里给了**空列表** ⇒ 直接报 `EXPORT_ERROR` 并指明是哪个参数（旧版会静默丢掉这条报表，
+`total: 0` + exit 0，看着像跑完了）；多条任务展开出**同一个 output 路径** ⇒ 顶层 `warnings` 数组给一条提示
+（后写的会覆盖先写的，多半是 `output` 漏了 `{参数名}` 占位）。
+
+### 6.19c 连接失败分三类：超时 / 被对端重置 / 本机代理（提示各不相同）
 
 ```
-导出请求失败: The read operation timed out（当前超时 30.0s；复杂报表属正常，
-用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，不要先怀疑报表或改参数）
+导出请求失败: The read operation timed out（当前超时 30.0s；复杂报表属正常，用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，不要先怀疑报表或改参数）
+导出请求失败: [Errno 54] Connection reset by peer（连接被对端重置/断开，这不是超时——调大 FRCLI_TIMEOUT 无效。同一命令原样重试通常即成功…）
+请求失败: 503 Service Unavailable（本机 HTTP 代理链路故障：httpx.ProxyError 表示失败发生在「代理这一跳」…）
 ```
+
+- **超时**：服务端还在算 → 调大 `FRCLI_TIMEOUT` 后原样重试。
+- **被对端重置/断开**（`Connection reset by peer` / `broken pipe` / `RemoteProtocolError`）：服务端渲染大报表耗时较长时偶发掐断，
+  **原样重试即成功**（实测：单条连试 3 次全被 reset，随后同一命令成功；批量 6 条里 2 条被 reset，单独重试即成功）。
+  调大超时无效 —— 旧文案把 reset 归进"超时类"，用户按提示把 900→1200→1800 照样被 reset。
+- **本机代理故障**（`httpx.ProxyError`；或 5xx 响应带 `Proxy-Status` 头）：失败发生在**代理这一跳**，不是平台，
+  也不是超时。先查代理/VPN 链路与节点，`frcli server test` 也走同一代理、只能复核。
+  CLI **不会自动绕过用户代理**；确要绕过请自己在 `NO_PROXY` 里排除平台地址。
+  只认 `Proxy-Status`（RFC 9209）—— `Via` 平台侧网关也会加，拿它判定会把平台自身 5xx 误报成本机代理故障。
+
+自动重试（0.10.3 起）：**只对幂等 GET/HEAD 重试 1 次**（POST/PUT/DELETE 不重试 —— 写操作重放有风险），
+**超时与代理故障都不重试**（代理链路故障非瞬时，重发没有收益）。
+重发次数记在客户端 `net_retries`，`export` / `export batch` / `server test` 的输出里可读（正常为 0）。
+
+分类逻辑在 `src/frcli/neterr.py`（单一真源），**登录失败（`登录请求失败: …`）同样按这三类报**：
+无 token 缓存时失败落在登录这一跳，不共用分类就会裸报 `503 Service Unavailable`，看不出是代理还是超时；
+登录响应若是 **5xx + `Proxy-Status`** 也按代理故障报，不再是干巴巴的 `登录失败: HTTP 503`。
+登录是 POST、链路故障通常也不是瞬时问题，**不自动重试**。
 
 ### 6.19c0 会话巡检工具（`tools/scan_sessions.py`）
 
@@ -772,8 +808,11 @@ frcli export batch ./manifest.yaml     # → 复盘_20260430.xlsx / _20260531.xl
 | `frcli: command not found` | 按 `references/install.md` 自举：`python <base>/references/run.py <命令>` 或 `cd <base>/src && python -m frcli <命令>`（零安装） |
 | `导出产物魔数不符` / `导出被服务端排队` | 服务端返回的是出错页或 `Dec-Waiting_In_Line` 排队页；重试一次通常即成功，批量要降并发（§6.1） |
 | `读取报表数据集 xxx失败: 错误代码:11300001 数据集 [y] 配置错误…` | 该模板里有坏数据集，平台原文已给出**坏数据集名 + SQL 报错**；这是报表本身的问题，不是 CLI 故障（§6.5） |
-| 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，解码页面里的 `detail-message` 定位坏数据集（§6.1） |
+| 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，报错里已带平台原文的 `detail-message`（§6.1） |
+| `导出产物是平台出错页…平台原因: 错误代码:11300002…` | 宽表走默认分页导出所致：加 `--params '{"extype":"simple"}'` 改原样导出后重试（§6.1） |
 | `导出请求失败: The read operation timed out` | 设 `FRCLI_TIMEOUT=300`（批量 600）重跑（§6.2） |
+| `请求失败: …Connection reset by peer` / `broken pipe` | **不是超时**：原样重试即成功（批量里失败的那几条单独重试）；调大 `FRCLI_TIMEOUT` 无效（§6.19c） |
+| `请求失败: 503 Service Unavailable（…本机 HTTP 代理链路故障…）` | 失败在**本机 HTTP 代理这一跳**（`httpx.ProxyError`），不是平台故障：查代理/VPN 与节点；`server test` 走同一代理，只能复核（§6.19c） |
 | `schedule list` / `report list` 返回 `[]` | 认证失效（可能未过期）：0.1.1 起自动重登一次；仍为空则手动 `rm -f ~/.frcli/tokens/*.json`（§6.4） |
 | `server test` 报 ok 但列表全 `[]` | 旧版假阳性（只查本地缓存，真发请求）；`relogin: true` 表示这回检测到失效并重登过（§6.6） |
 | `未配置任何 FineReport 实例` | `frcli server add ... --set-default` |

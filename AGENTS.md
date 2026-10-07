@@ -33,6 +33,7 @@ fanruan_v10/
 │   ├── cli.py            # Click 命令组注册入口
 │   ├── client.py         # FineReportClient：HTTP API 封装、导出、模板、定时任务
 │   ├── auth.py           # TokenManager：登录、token 缓存、cookies 保留
+│   ├── neterr.py         # 传输层错误分类与提示（client 与 auth 共用，避免重复文案）
 │   ├── config.py         # 多实例配置（~/.frcli/config.yaml）
 │   ├── output.py         # JSON / table 输出、成功与错误封装
 │   ├── remotedesign.py   # 远程设计通道：服务端模板读写（report upload/delete 的后端）
@@ -139,6 +140,48 @@ fanruan_v10/
 **排队页**（`Dec-Waiting_In_Line`，约 2KB，重试一次即成功）。`export` 0.6.0 起内置魔数校验。
 出错页的 `detail-message` 属性有单引号/双引号两种写法，解析要都认。
 页面 `detail-message`（HTML 实体编码）里有具体错误代码与原始 SQL，解码即可定位坏数据集。
+0.10.3 起 `assert_export_magic` 的 `EXPORT_ERROR` **把平台原因一并带出**（与 `_unwrap_json` 共用
+`_html_error_reason()`），读到 `11300002` 还附 `--params '{"extype":"simple"}'` 的建议；
+读取长度为 64KB 有界读 —— 出错页的 `detail-message` 落在 4KB 级页面的后半段，只看前 512B 会漏。
+
+### 连接被对端重置 ≠ 超时；本机代理故障 ≠ 平台故障
+
+三种传输层失败的**处置完全不同**，混成一句提示会把人带沟里（2026-10 实测）：
+
+| 形态 | 判据 | 正确处置 |
+|------|------|----------|
+| 超时 | `httpx.TimeoutException` / `timed out` | 调大 `FRCLI_TIMEOUT` 后原样重试（服务端还在算） |
+| 连接被重置/断开 | `connection reset` / `reset by peer` / `broken pipe` / `RemoteProtocolError` | **原样重试即成功**（实测单条连试 3 次全被 reset，随后同一命令成功；批量 6 条里 2 条被 reset，单独重试即成功）；调大超时**无效** —— 曾被归进超时类，用户把 900→1200→1800 照样被 reset |
+| 本机 HTTP 代理故障 | `httpx.ProxyError`（`str(e)` 只有 `503 Service Unavailable`，看不出是代理）；或 5xx 响应带 `Proxy-Status` 头（**只认它**：`Via` 平台网关也会加，拿它判定会把平台自身 5xx 误报成代理） | 失败在**代理这一跳**，不是平台：查代理/VPN 与节点，`server test` 走同一代理只能复核；**不自动绕过用户代理** |
+
+`_request` 的自动重试是**有界**的：只对幂等 GET/HEAD 重试 1 次（POST/PUT/DELETE 不重试 —— 写操作重放有风险），
+**超时与代理故障都不重试**；次数记在 `client.net_retries`，`export` / `export batch` / `server test` 输出里可读。
+
+分类与文案在 `src/frcli/neterr.py`（中性模块）——`client.py` 依赖 `auth.py`，反向 import 会成环，
+共用是为了让**登录这一跳**（`auth.TokenManager.login`）与请求这一跳给出同一份建议：
+无 token 缓存时失败落在登录跳，不共用就会裸报 `登录请求失败: 503 Service Unavailable`；
+登录响应若是 5xx + `Proxy-Status`（`neterr.is_proxy_5xx`），同样按代理故障报，而不是 `登录失败: HTTP 503`。
+登录是 POST、链路故障通常非瞬时，**登录不自动重试**；非传输层错误（坏 JSON、token 落盘失败）
+仍报原文，不套网络话术。
+
+### 导出产物的"出错页"判定必须看**开头**，不能看"窗口里出现过"
+
+读取窗口由 512B 放宽到 64KB（0.10.3 为取 `detail-message`）时，**正文串判定必须同步收紧**：
+合法 CSV 的第 201 行备注写成 `201,出错页面Oops`（offset 600+），旧判据"64KB 里含「出错页面」/`Oops!!!`"
+会把**好产物**判成出错页、改名 `.bad`（0.10.2 的 512B 窗口看不到它，属新引入的行为回归）。
+判据：`_looks_like_html_head()` = 先剥掉**前导 HTML 注释（可连续多个）/XML 声明与 PI/空白/BOM**，再以 `<!doctype`/`<html` 开头
+（实测坏产物首字节就是 `<!do`；平台页若被包一层注释或 XML 声明，不剥就会被当成数据放行），
+**HTML 形态 且 含特征串** 才算出错页；csv/text 的 HTML 形态产物一律拒收；魔数判定不受影响。
+已知残留：前缀是**未闭合/畸形注释**时 csv/text 仍会放行（平台实际不出这种页；xlsx 有魔数兜底）。
+
+### 批量导出的失败条目必须能定位到"哪一项"
+
+`export batch` 支持参数矩阵（`params` 给列表 × `output` 的 `{参数名}` 占位），同一报表会出多份产物。
+旧版 `errors` 条目只有 `report/format/error`：同报表多组参数失败时两条文案一字不差，只能靠文件 mtime 猜是 5 月还是 6 月；
+`total` 又用 manifest 条数，出现 `total:1` 而 `success+failed:6` 的对不上账。
+现在 `results` 与 `errors` 都带本次 `params` 与已展开的 `output`，`total` 是**展开后**的任务数，manifest 条数另给 `manifest_reports`。
+两个边界：`params` 给**空列表** ⇒ `EXPORT_ERROR` 明确点名是哪个参数（旧版静默丢报表：`total: 0` + exit 0，看着像跑完了）；
+多条任务展开出**同一个 output 路径** ⇒ 顶层 `warnings` 数组提示会互相覆盖（多半是 `output` 漏了 `{参数名}` 占位）。
 
 ### 出错页 `detail-message` 是通用诊断/挖接口入口（**不限导出**）
 
