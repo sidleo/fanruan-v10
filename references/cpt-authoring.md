@@ -79,7 +79,7 @@ C3 number_format = '#,##0'                      ← 数字格式生效
 | 加/改参数 | `report param REMOTE --add p=v` / `--set-default p=v` / `--remove p` `[--apply]` | 写 |
 | 看样式表 | `report style REMOTE --list` | 🟢 只读 |
 | 加样式 | `report style REMOTE --add --num-format "#,##0.00" --bold --bg '#FFF2CC' --align center --border` `[--apply]` | 写 |
-| 一次生成整张表 | `report table REMOTE --dataset ds --at A1 --columns a,b,c [--mode list\|group\|summary] [--fn sum] [--group-by x,y] [--header] [--labels "x,y,z"] [--expand v]` `[--apply]` | 写 |
+| 一次生成整张表 | `report table REMOTE --dataset ds --at A1 --columns a,b,c [--mode list\|group\|summary] [--fn sum] [--group-by x,y] [--header] [--labels "x,y,z"] [--expand v] [--sheet S]` `[--apply]` | 写 |
 | **造交叉表/动态列** | `report crosstab REMOTE --dataset ds --at A3 --row a,b --col c --value v [--agg sum] [--total-row] [--total-col]` `[--apply]` | 写 |
 | **写条件属性** | `report highlight REMOTE --at D3\|A3:D3 --rule '条件:动作' [--rule …] \| --clear \| --list` `[--apply]` | 写 |
 | **分页设置** | `report page REMOTE --list \| --header-height N --footer-height N --freeze 列,行 --no-repeat-rows 3` `[--apply]` | 写 |
@@ -255,6 +255,11 @@ frcli report new "$R" --output /tmp/r.cpt            # 只生成本地文件，�
 ```bash
 frcli report table "$R" --dataset ds1 --at A2 --columns code,name,cnt --header --widths 12,16,10 --apply
 ```
+
+多 sheet 模板要同时给 `--sheet <表名>` —— 每张 sheet 各有一份 `<ColumnWidth>`，指定哪张就改哪张；
+不给 `--sheet` 时取**全文第一份存在的** `<ColumnWidth>`（正常模板每张都有 ⇒ 就是第一张，
+但第一张缺这个元素时会落到后面那张 sheet 上）。目标 sheet 没有真 `<ColumnWidth>` 时报错，
+**不会**把宽度写进该 sheet 单元格文本里的字面 XML。
 
 实测生效：导出后 `ws.column_dimensions['A'].width == 12.0`。
 非表格场景（要给任意列设宽）才需要 download → 改 `<ColumnWidth>` 字节 → upload。

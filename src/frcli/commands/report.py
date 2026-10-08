@@ -875,13 +875,14 @@ def report_style(report_path, list_only, add_style, xml_file, num_format, bold, 
 @click.option("--style", type=int, help="数据行样式索引")
 @click.option("--header-style", type=int, help="表头样式索引")
 @click.option("--widths", help="列宽（字符数），逗号分隔，与 --columns 一一对应，如 12,16,14")
+@click.option("--sheet", help="sheet 名（多 sheet 时用）")
 @click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印 diff）")
 @click.option("--any-path", is_flag=True,
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
 def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, header, labels,
-                 expand, style, header_style, widths, apply, any_path, fmt, instance):
+                 expand, style, header_style, widths, sheet, apply, any_path, fmt, instance):
     """一次生成整张取数表（表头 + 逐列绑定 + 扩展方向 + 数据设置，🟠 默认 dry-run）
 
     \b
@@ -890,6 +891,7 @@ def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, heade
       frcli report table …/r.cpt --dataset ds1 --at A2 --columns k,val --mode group --apply
       frcli report table …/r.cpt --dataset ds1 --at A2 --columns 地区,销售员,销量 \\
           --mode summary --group-by 地区,销售员 --fn sum --header --apply
+      frcli report table …/r.cpt --sheet 明细表 --dataset ds1 --at A2 --columns k,val --apply
     """
     try:
         if apply:
@@ -903,7 +905,8 @@ def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, heade
                                       header_style=header_style,
                                       mode=mode, fn=ds_fn,
                                       group_by=[g for g in (group_by or "").split(",")],
-                                      widths=[w for w in widths.split(",")] if widths else None)
+                                      widths=[w for w in widths.split(",")] if widths else None,
+                                      sheet=sheet)
         _out_plan(result, fmt)
     except Exception as e:
         error(e)

@@ -2590,18 +2590,31 @@ def _set_template_id(text: str, template_id: str) -> str:
 EMU_PER_CHAR = 280800     # 实测：ColumnWidth 值 ÷ 280800 = 导出后的列宽字符数
 
 
-def set_col_widths(text: str, widths, default_chars: float = None):
+def set_col_widths(text: str, widths, default_chars: float = None, sheet: str = None):
     """改写 `<ColumnWidth>` 的 CDATA 数组。
 
     widths: {列下标(0起): 列宽字符数}；default_chars 给定时同时改 defaultValue。
     支持自闭合与带 CDATA 两种写法（真实模板两种都有）。
+    `sheet` 给定时只改**该 sheet** 的 `<ColumnWidth>`（每张 sheet 各有一份，见 `add_sheet`）；
+    两条路径都走**元素解析**（`<Report>` 的直接子元素），不认单元格文本里的字面 XML；
+    不给 `sheet` 时取**第一个带它的 `<Report>`**（正常模板每张都有 ⇒ 第一张），
+    没有 `<Report>` 的简化模板退到 `<WorkBook>` 的直接子元素。
     """
     import re as _re
     pat = _re.compile(r"<ColumnWidth([^>]*?)(?:/>|>\s*(?:<!\[CDATA\[(.*?)\]\]>)?\s*</ColumnWidth>)",
                       _re.S)
-    m = pat.search(text)
+    if sheet is None:
+        cw = None
+        for holder in find(text, "Report") + find(text, WORKBOOK_TAG)[:1]:
+            cw = _first_child(text, holder, "ColumnWidth")
+            if cw is not None:
+                break
+    else:
+        cw = _first_child(text, pick_sheet(text, sheet), "ColumnWidth")
+    m = pat.match(text, cw.open_start, cw.close_end) if cw is not None else None
     if not m:
-        raise ApiError("模板里没有 <ColumnWidth>，无法设置列宽")
+        where = "模板里" if sheet is None else f"sheet {sheet!r} 里"
+        raise ApiError(f"{where}没有 <ColumnWidth>，无法设置列宽")
     attrs = m.group(1)
     cdata = (m.group(2) or "").strip()
     # defaultValue 保留原值（或按参数改）

@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.3
+version: 0.10.4
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -91,11 +91,11 @@ frcli [--version] [-i INSTANCE] [-v]
 │   │                                                     样式表（数字格式/粗体/底色/边框），加完用 --style N 绑
 │   ├── table REMOTE --dataset ds --at A1 --columns a,b,c [--header] [--labels "x,y,z"]
 │   │          [--expand v|h|none] [--mode list|group|summary] [--fn sum] [--group-by x,y]
-│   │          [--widths 12,16] [--style N] [--header-style N] [--apply] [--any-path]
+│   │          [--widths 12,16] [--style N] [--header-style N] [--sheet S] [--apply] [--any-path]
 │   │                                                     一次生成整张取数表（表头+逐列绑定+扩展）
 │   ├── crosstab REMOTE --dataset ds --at A3 --row a,b --col c --value v
 │   │          [--agg sum|count|avg|max|min] [--total-row] [--total-col] [--no-header]
-│   │          [--label S] [--value-labels x,y] [--style N] [--header-style N] [--widths W]
+│   │          [--label S] [--value-labels x,y] [--style N] [--header-style N] [--widths W] [--sheet S]
 │   │                                                     交叉表/动态列（行×列×值，列数随数据自动增长）
 │   ├── highlight REMOTE --at D3|A3:D3 --rule '条件:动作' [--rule …] | --clear | --list
 │   │          [--sheet S] [--apply] [--any-path]          条件属性：阈值标红/热力图/隔行变色/隐藏整行
@@ -105,15 +105,15 @@ frcli [--version] [-i INSTANCE] [-v]
 │   │          --repeat-rows 3,4 | --no-repeat-rows 3,4
 │   │          --repeat-header-rows 1:1 | --repeat-footer-rows a:b | --repeat-header-cols c:d
 │   │          --header-text S | --footer-text S [--footer-formula] [--footer-position x]
-│   │          --page-freeze on|off                      分页设置（重复标题行/页眉页脚页码/冻结）
+│   │          --page-freeze on|off [--sheet S]          分页设置（重复标题行/页眉页脚页码/冻结）
 │   ├── chart REMOTE --at A1 --dataset ds --type column|line|pie|ring --category C
-│   │          [--series S] --value V [--fn sum] [--title T] [--show-title] [--cs N] [--rs N]
+│   │          [--series S] --value V [--fn sum] [--title T] [--show-title] [--cs N] [--rs N] [--sheet S]
 │   │          | --list                                  图表（VanChart；导出 xlsx 是嵌入图片）
 │   ├── widget REMOTE --param p --type combo|date|text|check|number [--options "a,b"]
 │   │          [--default v] [--label L] [--x/--y/--width/--height] | --list
 │   │                                                     参数面板控件（**控件名=参数名** 才联动）
 │   └── link REMOTE --at A3 --to 报表路径|URL [--type reportlet|web|javascript]
-│              [--param k=v …] [--frame _self|_blank] | --clear | --list
+│              [--param k=v …] [--frame _self|_blank] [--sheet S] | --clear | --list
 │                                                        单元格超链接/钻取（纯预览态交互）
 │    ⚠️ 上面 12 条创作命令**默认 dry-run**，`--apply` 才写；语法与配方见 references/cpt-authoring.md、
 │       **references/cpt-patterns.md**（第一辑 8 类）、**references/cpt-patterns2.md**（第二辑：
@@ -608,6 +608,13 @@ frcli report table "$R" --dataset ds1 --at A2 --columns 地区,销售员,销量 
 frcli report cell "$R" --at D2 --set-ds-mode list --apply      # 改已有格的数据设置
 ```
 
+多 sheet 模板要给 **`--sheet 表名`**（缺省第一张；`--widths` 跟着 `--sheet` 走，列宽定位规则见 §6.20）：
+
+```bash
+frcli report table "$R" --sheet 明细表 --dataset ds1 --at A2 --columns code,cnt --header --apply
+# sheet 名写错 → 报出全部现有 sheet 名（先 `report sheet --list` 看有哪些），不写盘
+```
+
 `report table` 会**整格改写**目标区域 —— 要留标题行就 `--at A2`（先写表再写 A1 会把表头盖掉）。
 骨架也可以从现成模板裁：`report new "$R" --from <某张现成模板.cpt> --apply`（保留版面/样式表，清空内容）。
 
@@ -780,6 +787,12 @@ frcli export batch ./manifest.yaml     # → monthly_review_20260430.xlsx / _202
 
 `frcli report sheet <模板> --list | --add 名 [--clone-from 名] | --rename 旧 新 | --remove 名`
 （默认 dry-run，`--apply` 才写）。`--add` **克隆已有 sheet 的版面骨架**（纸张/列宽都在里面）但清空单元格 —— 加「口径说明」页这类需求不用再手工拼 `<Report>` 块。
+
+`--sheet 名` 也是 `report cell/highlight/table/crosstab/page/chart/link` 的**写入目标选择器**（多 sheet 模板用），
+缺省写第一张；名字不存在一律报出全部现有 sheet 名，不静默落到第一张。
+（唯一例外：`--widths` 走 `<ColumnWidth>`，不给 `--sheet` 时按**全文第一份存在的** `<ColumnWidth>` 定位 ——
+正常模板每张 sheet 都有一份，第一张缺这个元素时才会落到后面那张；目标 sheet 没有真元素时报错，
+不会误写单元格文本里的字面 XML。）
 
 **「口径说明」页的内容规范**（业务向）见 `references/cpt-patterns2.md` §W3.7：
 每个指标写全「统计范围 / 计算逻辑 / 数据来源与更新时点」；范围要写**可判定的语义**

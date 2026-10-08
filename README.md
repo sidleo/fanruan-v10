@@ -90,6 +90,8 @@ frcli report table "$R" --dataset ds1 --at A2 --columns code,cnt --header --appl
 #   数据设置（<RG>）默认 list（记录原样展开）；不写 <RG> 服务端按「分组」去重、会静默改数
 frcli report table "$R" --dataset ds1 --at A4 --columns 地区,销售员,销量 \
     --mode summary --group-by 地区,销售员 --fn sum --header --apply
+frcli report table "$R" --sheet 明细表 --dataset ds1 --at A2 --columns code,cnt --apply
+#   多 sheet 模板用 --sheet 选写入目标（缺省第一张；cell/highlight/table/crosstab/page/chart/link 都吃它）
 frcli report cell "$R" --at D3 --set-ds-mode list --apply
 frcli report cell "$R" --at A1 --set-formula '="TOP" + $topn' --merge A1:C1 --apply
 frcli report cell "$R" --list -f table              # 只读：A1/值/公式/绑定/ds_mode/扩展/样式

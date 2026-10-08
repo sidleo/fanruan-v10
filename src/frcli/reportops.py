@@ -971,7 +971,8 @@ def template_styles(config, report_path: str) -> dict:
 # ---------------------------------------------------------------------------
 def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
                labels=None, expand: str = "v", style=None, header_style=None,
-               widths=None, mode: str = "list", fn: str = None, group_by=None):
+               widths=None, mode: str = "list", fn: str = None, group_by=None,
+               sheet: str = None):
     """在 `--at` 处生成「表头 + 逐列绑定 + 扩展 + 数据设置」的整张表（内存计算）。
 
     `--mode` 三选一（**默认 list**，见 cpt-features.md §1 为什么不是 group）：
@@ -979,6 +980,9 @@ def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
     - `group`：每列都是分组（`FunctionGrouper` 自闭合）——相同值合并
     - `summary`：`--group-by` 的列保持分组，其余列汇总（`--fn`，默认 sum）；
       汇总格自动用 `<Expand/>`（一个汇总值不扩展），分组格用 `--expand`
+
+    `sheet` 指定写哪一张 sheet（多 sheet 模板）；不给 = 第一张（与历史行为一致）。
+    sheet 名不存在时由 `cptxml.pick_sheet` 报出全部现有 sheet 名。
     """
     _dataset(text, dataset)
     cols = [str(c).strip() for c in columns]
@@ -1030,7 +1034,7 @@ def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
             new_text, _ = cptxml.put_cell(
                 new_text, cptxml.format_a1(c0 + i, r0),
                 cptxml.cell_xml(c0 + i, r0, value=(labels[i] if labels else col),
-                                style=header_style))
+                                style=header_style), sheet)
         if mode == "summary":
             col_mode = "group" if col in dims else "summary"
         else:
@@ -1041,7 +1045,7 @@ def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
             new_text, cptxml.format_a1(c0 + i, row),
             cptxml.cell_xml(c0 + i, row, binding=f"{dataset}.{col}", expand=col_expand,
                             style=style, ds_mode=col_mode,
-                            ds_fn=(fn or "sum") if col_mode == "summary" else None))
+                            ds_fn=(fn or "sum") if col_mode == "summary" else None), sheet)
         change = {"kind": f"cell.{info['action']}", "at": cptxml.format_a1(c0 + i, row),
                   "binding": f"{dataset}.{col}", "expand": col_expand,
                   "ds_mode": col_mode}
@@ -1061,7 +1065,8 @@ def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
         _warn_summary_column(changes, [c for c in cols if c not in dims])
     if widths:
         new_text = cptxml.set_col_widths(new_text,
-                                         {c0 + i: w for i, w in enumerate(widths)})
+                                         {c0 + i: w for i, w in enumerate(widths)},
+                                         sheet=sheet)
         changes.append({"kind": "col_width",
                         "cols": [cptxml.format_a1(c0 + i, 0).rstrip("0123456789")
                                  for i in range(len(widths))],
@@ -1594,7 +1599,8 @@ def plan_crosstab(text: str, dataset: str, at: str, rows, cols, values,
 
     if widths:
         new_text = cptxml.set_col_widths(new_text,
-                                         {c0 + i: w for i, w in enumerate(widths)})
+                                         {c0 + i: w for i, w in enumerate(widths)},
+                                         sheet=sheet)
     changes.append({"kind": "crosstab", "dataset": dataset, "at": at,
                     "row": rows, "col": cols, "value": values, "agg": agg,
                     "total_row": bool(total_row), "total_col": bool(total_col),
