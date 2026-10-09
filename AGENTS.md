@@ -214,10 +214,12 @@ fanruan_v10/
 
 要最新记录用 `schedule record`（倒序）或放大 `-n` 后取最后一条。
 
-### 默认 30s 超时，复杂报表必然超时
+### 默认 30s 超时，复杂报表必然超时（导出与模板读取都吃它）
 
 同一张报表默认超时 → `导出请求失败: The read operation timed out`；`FRCLI_TIMEOUT=300` → 50s 成功导出 225KB xlsx。
-超时由环境变量 `FRCLI_TIMEOUT` 控制（`client.py` 读取）。
+超时由环境变量 `FRCLI_TIMEOUT` 控制（`client.py` 读取）。**模板读取命令同样吃这个默认值**：
+`report info / datasets / paras / download` 由服务端解析模板（含数据集校验），复杂模板**冷启动**实测 50s 级、
+同一命令紧接着重跑约 18s（服务端已缓存）⇒ 动手前先设 `FRCLI_TIMEOUT=300`，别等第一次打空。
 
 ### 报表路径约定
 
