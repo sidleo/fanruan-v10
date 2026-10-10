@@ -275,7 +275,7 @@
 3. **`report check` 未落地**：原计划的"模板体检"命令不存在（`TemplateChecker` 只有 `checkFont`），能力由 `report fonts` 承担并已在 §8.3 验证。`rpc` 与 `report edit` 均已在 §8 验证。
 4. **`schedule` 写操作、`attach upload`**：未做（危险/不在范围）。`schedule` 只读命令借用历史结论，本轮未复跑。
 5. **`export batch`**：未做（会批量触发服务端计算）。
-6. **`report list /` 全量 3870 条**：未复跑（避免无谓负载），沿用 SKILL.md 实测值。
+6. **`report list /` 全量（数千条，随时间增长）**：未复跑（避免无谓负载），沿用 SKILL.md 实测值。
 7. **通道对无授权路径返回 0 字节**：这是 Lead 的抽样结论，我未独立复现（只复现了"无授权路径 `download` 报两可错误"这一现象）。
 8. **排队页（`Dec-Waiting_In_Line`）未真机复现**：限流是瞬时的，只做了离线判据验证（§8.2 S4 行）。
 9. **`rpc call` 的写方法未做真实成功写入**：越界全被拒（符合预期），域内成功写入未测 —— 模板写入统一走 `report upload`/`report edit` 已足够覆盖，`rpc` 直写没有额外验证价值。

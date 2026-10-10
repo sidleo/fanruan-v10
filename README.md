@@ -27,7 +27,7 @@ python references/run.py --version        # 跨平台启动器
 frcli server add yh --url https://<服务器> -u <工号> -p '<密码>' --set-default
 frcli server test
 
-# 2. 找报表（目录要具体；`/` 会拉全量，实测 3870 条）
+# 2. 找报表（目录要具体；`/` 会拉全量，数千条，随时间增长）
 frcli report list "demo_group/demo_user/dept_a/dept_b" -f table
 
 # 3. 看参数与取数口径
@@ -123,13 +123,17 @@ frcli attach remove default1789441975426_Olw7l        # 用完清理
 | 命令组 | 用途 | 主要命令 |
 |--------|------|----------|
 | `server` | 多实例配置 | `list` / `add` / `remove` / `set-default` / `test` |
-| `report` | 报表模板 | `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed` / `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` |
+| `report` | 报表模板 | `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed`（模板认证配置路由，非权限树，见下）/ `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` |
 | `export` | 报表导出 | `pdf` / `excel` / `word` / `image` / `csv` / `batch` |
 | `attach` | 服务器附件 | `upload` / `remove`（附件缓存，不动报表目录） |
 | `system` | 系统与平台信息 | `version` / `health` / `modules` / `authority` / `login-policy` |
 | `entry` | 平台条目与消息 | `list` / `roots` / `all` / `messages` |
 | `user` | 用户与组织 | `list` / `me` / `departments` / `posts` |
 | `schedule` | 定时任务 | `list` / `tasks` / `get` / `exists` / `executing` / `create` / `update` / `delete` / `run` / `history` / `record` / `records` / `log` / `setting` |
+
+> ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
+> （`/decision/v10/report/templates/all/authentication`），实测**恒返回 `[]`**（HTTP 200 的原始响应即 `{"data":[]}`），
+> 与账号有没有权限无关。枚举有权限的模板树用 `report list`（平台已按权限过滤）；空结果的提示打在 **stderr**，stdout 仍是合法 JSON。
 
 完整命令树、参数语义与安全分级见 **`SKILL.md`**；`frcli <命令组> --help` 是最终事实来源。
 

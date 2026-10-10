@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.5
+version: 0.10.6
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -63,7 +63,8 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── download REPORT [-o LOCAL]           下载模板**原始字节**（走远程设计通道，与 upload 同源）
 │   ├── serverdatasets [-f]                  服务器数据集清单（平台级，实测 113 个）
 │   ├── columns DATASET [-f]                 服务器数据集的字段清单（列名/列类型）
-│   ├── authed [--keyword K]                 当前账号有权限的模板树
+│   ├── authed [--keyword K]                 模板「认证(authentication)」配置路由（⚠️ 实测恒返回
+│   │                                          `[]`，**不是**权限树；枚举有权限报表用 `list`，见 §6.6）
 │   ├── upload LOCAL REMOTE [--force]        🔴 上传/覆盖服务端模板（远程设计通道，见 §6.7）
 │   │                                          写前占锁+自动备份到 ~/.frcli/backups/，写后回读校验 SHA256
 │   ├── delete REPORT --force                🔴 删除服务端模板（移入回收站，可恢复）
@@ -338,6 +339,7 @@ frcli schedule setting
 ### 6.4 空数组 `[]` = 认证失效（**未必过期**）
 
 token 缓存 `~/.frcli/tokens/<instance>.json`（默认 24h）。`schedule list` / `report list` 返回 `[]` 而服务器确有数据时，先怀疑认证，而不是「服务器没有数据」。
+⚠️ 例外：`report authed` 的 `[]` 与认证无关（该路由恒空，见 §6.6）。
 
 **本地 `expires_at` 还在未来也会失效**（实测：缓存远未过期，列表全返回 `[]`，换新 token 立刻正常）。本服务器失效 token 的真实表现是 **302 重定向到 CAS 登录页**（`https://sso.example.com/cas/login?...`），**不是 401** —— 只判 401/403 会漏掉。
 
@@ -356,7 +358,12 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 - `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿），且请求体是**裸数组** `["<id>"]`。传错会报 `任务不存在` 或删不动。
 - `schedule get` 内部是**模糊搜索取第一条**，任务名需与 `schedule list` 完全一致，避免误命中。
 - `report list <目录>` 结果里会**包含该目录自身**一条（`is_directory: true`），属正常实现，过滤掉即可。
-- `report list /` 会返回**整个服务器**的文件树（实测 3870 条），不要用 `/` 当"顶层"。
+- `report list /` 会返回**整个服务器**的文件树（数千条，随平台增长；实测 2026-10 约 3.9k），不要用 `/` 当"顶层"。
+- ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
+  （`GET /decision/v10/report/templates/all/authentication`），实测该路由**恒返回 `[]`**（HTTP 200 的原始响应就是
+  `{"data":[]}`，`keyword/type/id/pid` 多种参数形态同样为空）——**空数组不代表账号没权限**，别拿它判断
+  「我有哪些报表」。要看有权限的模板树用 `report list`（平台已按权限过滤；实测 2026-10 约 3.9k 条）。
+  结果为空时 0.10.6 起会在 **stderr** 打一行提示（stdout 仍是合法 JSON，管道解析不受影响）。
 - `schedule history [任务名]` 是 **taskName 精确匹配**：任务近几天没有日志就静默返回 `[]`，不代表 CLI 坏了（不传名字才看全局日志）。
 - ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`（倒序，最新在前）。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。

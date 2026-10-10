@@ -379,9 +379,12 @@ fanruan_v10/
 长度相同 → 文件大小看着没变，最容易误判"模板被改了"。
 **判据**：比 `<TableData name>` / `<Query>` / `<DatabaseName>` 的结构化哈希，不要比整文件 SHA256。
 
-### `report list /` 返回全量
+### `report list /` 返回全量；枚举有权限模板也用它
 
-`directory="/"` 时不做过滤，返回整个服务器文件树（实测 3870 条）；`report list <目录>` 结果里含该目录自身一条。
+`directory="/"` 时不做过滤，返回整个服务器文件树（数千条，随时间增长）；`report list <目录>` 结果里含该目录自身一条。
+`report authed` **不是**权限树：它走模板「认证(authentication)配置」路由（`/report/templates/all/authentication`），
+实测**恒返回 `[]`**（HTTP 200 的原始响应就是 `{"data":[]}`，换 `keyword/type/id/pid` 参数形态同样为空）——
+空数组**不代表账号没权限**，别拿它判断「我有哪些报表」；0.10.6 起空结果在 **stderr** 打一行提示（stdout 仍是合法 JSON）。
 
 ### token 缓存与认证失效（**不等于 401**）
 

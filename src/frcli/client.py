@@ -729,7 +729,11 @@ class FineReportClient:
         return _unwrap_json(resp, "读取数据集字段").get("data", [])
 
     def get_authenticated_templates(self, keyword: str = None) -> list[dict]:
-        """当前账号有权限的模板树（`GET /decision/v10/report/templates/all/authentication`）"""
+        """模板「认证(authentication)配置」路由的原始返回（`GET …/report/templates/all/authentication`）。
+
+        这是模板认证配置路由，**不是**「当前账号有权限的模板树」：实测恒返回 `[]`（HTTP 200 的
+        原始响应即 `{"data":[]}`），与权限无关；枚举有权限的模板树用 `list_reports()`。
+        """
         self._ensure_auth()
         params = {"keyword": keyword} if keyword else None
         resp = self._get(

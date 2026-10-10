@@ -27,19 +27,56 @@ import sys
 
 SESSIONS = pathlib.Path("~/.dsh/sessions").expanduser()
 
-#: 「真的执行了 frcli」判据 —— 只认**命令位**上的 frcli，不认"提到"。
+#: 「真的执行了 frcli」判据 —— 只认**命令位**上的 frcli（裸名或路径形式），不认"提到"。
 #: 反复踩过两次假阳性（2026-10 用标准答案测出来的）：
 #:   ① `references/run.py` 单独出现 → yh-bigdata 用同样的启动器结构，整批误报；
 #:   ② `\bfrcli\b` 太宽 → `ls .../skills/frcli/`、JS 代码里出现 "frcli"、`grep frcli` 全被算成使用。
-#: 允许命令位前有 `VAR=VAL` 赋值（如 `FRCLI_TIMEOUT=600 frcli …`）与 `env`。
+#: 允许命令位前有 `VAR=VAL` 赋值（如 `FRCLI_TIMEOUT=600 frcli …`）与 `env`；
+#: 也允许**路径前缀**（`/abs/bin/frcli`、`~/.local/bin/frcli`、`./references/frcli`、`../bin/frcli`、
+#: `$HOME/.local/bin/frcli`）——漏报过一次真实会话：14 次调用全写成全路径，只认裸 `frcli` 时整个会话被丢掉。
+#: 前缀不含 `=`（否则 `FRCLI_BIN=/opt/bin/frcli` 这种**纯赋值**会被当成执行），也不含引号
+#: （heredoc 里 `Path("…/src/frcli/…")` 是 Python 字符串，不是命令）。
+#: `frcli` 后不接 `\w`/`.`/`-`：`frcli-old`、`frcli.bak`、`frcli.sh`、`frcli-report-…` 都不是本 CLI。
+#:
+#: ⚠ 已知**覆盖边界**（只记录，不扩正则 —— 每放宽一次都换来一批假阳性）：
+#: `sudo /abs/frcli …`、`nohup …`、`exec/command/time /abs/frcli …` 这类**包装前缀**仍不命中（旧行为）。
+#: 主产物是「调用数 + 报错片段」，宁可少报也不要把非执行文本算成调用。
 CALL = re.compile(
-    r"(?:^|[\n;|&(]|\$\()\s*"                    # 命令位：行首 / ; | && || ( 或 $( 
+    r"(?:^|[\n;|&(]|\$\()\s*"                    # 命令位：行首 / ; | && || ( 或 $(
     r"(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+|env\s+(?:\S+=\S*\s+)*)*"   # 前置赋值 / env
-    r"frcli\b"
-    r"|python3?\s+-\s*m\s+frcli"                   # python -m frcli
+    r"(?:[^\s;|&()=\x22\x27`]*/)?"                # 路径前缀（绝对/~ / ./ / ../ / $HOME/…，不含引号）
+    r"frcli(?![\w.\-])"                           # frcli 必须是可执行名（后面不是 - . 或字母数字）
+    r"|python3?\s+-\s*m\s+frcli(?![\w.\-])"        # python -m frcli
     r"|fanruan[-_]v10/references/(?:frcli|run\.py)",  # 直接跑本 skill 的入口
     re.I | re.M,
 )
+
+#: shell 调用判据 = **参数形状**，不是工具名：`args` 能解析成含 `command` 字符串字段的对象。
+#: 实测（近 7 天 1.1 万+ 条 tool/call）：带 `command` 字段的只有 shell 类调用（本机名字就是 `bash`；
+#: 全量历史里还有 `ssh_exec`/`run`/`shell`/`exec`），而 `read` 是 `file_path`、`write` 是 `content`、
+#: `edit` 是 `file_path`、`send_message` 是 `message`、`wiki_create` 是 `path` —— 都没有 `command`。
+#: ⚠ 别改回"工具名白名单"：那会静默漏掉别的 shell 名（复审构造反例 `ssh_exec` 曾不被计入）。
+#: 别只按"有没有 command 字段"放行非 shell 工具 —— 上面那条实测就是这条判据的反例集。
+
+
+def shell_command(data: dict, args):
+    """shell 类调用的**命令正文**；不是 shell 调用返回 None。
+
+    判据：`args`（dict 或 JSON 字符串）能解析成含**非空字符串** `command` 字段的对象。
+    两条已知边界：
+      ① **无名记录**（旧格式 / 单测构造）保留原行为：args 非 JSON 时直接拿原文匹配
+         （本机 26226 条 tool/call 全部带 name，实际不可达）。
+      ② 有名字但 args 解析不出 `command`（非 JSON 原文 / 无该字段 / 空串 / 非字符串）⇒ 不算调用：
+         宁可少报，也不把"提到"算成执行（拿 arguments 原文匹配会把 read/wiki_create 的路径算进来）。
+    """
+    obj = args
+    if isinstance(args, str):
+        try:
+            obj = json.loads(args)
+        except Exception:
+            return args if not (data.get("name") or data.get("tool")) else None
+    cmd = obj.get("command") if isinstance(obj, dict) else None
+    return cmd if isinstance(cmd, str) and cmd else None
 
 #: 通用报错/异常信号（**只在 frcli 调用的结果里**用来兜底找错，见 scan()）
 ERR = re.compile(
@@ -142,10 +179,12 @@ def scan(rows: list[dict]) -> dict:
                                            "background job", "This is an automatically")):
                 user_msgs.append(txt.replace("\n", " ")[:300])
         elif t == "tool/call":
-            args = data.get("arguments")
-            if isinstance(args, str) and CALL.search(args):
+            # ⚠ 只匹配 **shell 调用的 command 字段**：别的工具（read/wiki_create…）参数里带
+            # `/…/frcli` 路径只是"提到"，拿 arguments 原文跑正则会把调用数与报错片段都撑大。
+            cmd = shell_command(data, data.get("arguments"))
+            if cmd and CALL.search(cmd):
                 frcli_call_ids.add((data.get("callId") or "").split("|")[0])
-                frcli_cmds.append(args.replace("\\n", " ")[:300])
+                frcli_cmds.append(cmd.replace("\\n", " ")[:300])
         elif t == "tool/result":
             # ⚠ 两处坑，都会让配对全失败（实测：报错片段恒为 0，漏掉全部真实报错）：
             #   ① 结果侧的 toolCallId **嵌在 `data.message` 里**，不在顶层；

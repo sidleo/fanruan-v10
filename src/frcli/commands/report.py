@@ -100,12 +100,26 @@ def columns_cmd(dataset_name, fmt, instance):
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
 def authed_cmd(keyword, fmt, instance):
-    """当前账号有权限的模板树"""
+    """读模板「认证(authentication)配置」这条路由的原始返回
+
+    走 `GET /decision/v10/report/templates/all/authentication` —— 这是模板认证配置路由，
+    **不是**「当前账号有权限的模板树」。实测该路由恒返回 `[]`（HTTP 200 的原始响应就是
+    `{"data":[]}`，`keyword/type/id/pid` 多种参数形态同样为空），**与账号有没有权限无关**。
+
+    要看有权限的模板树用 `report list`（平台已按权限过滤），别拿本命令判断「我有哪些报表」。
+
+    结果为空时在 stderr 打一行提示（stdout 仍是合法 JSON，可照常管道解析）。
+    """
     try:
         client = get_client(instance)
         with client:
-            output_data(client.get_authenticated_templates(keyword), format=fmt,
-                        title="有权限的模板")
+            data = client.get_authenticated_templates(keyword)
+            output_data(data, format=fmt, title="模板认证路由返回")
+            if not data:
+                click.echo(
+                    "提示：本路由（模板 authentication 配置）返回空 ≠ 无权限；"
+                    "有权限的模板树见 `frcli report list`（平台已按权限过滤）。",
+                    err=True)
     except Exception as e:
         error(e)
 
