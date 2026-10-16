@@ -58,8 +58,27 @@ def _is_auth_failure(resp: httpx.Response) -> bool:
     return False
 
 
+# 平台出错页里那段人话的两种**选择器**写法，两种都要认：
+#   ① `id=` 选择器（老语料/fixture：`<div id="detail-message">错误代码:11300002 …原始 SQL…</div>`）；
+#   ② `class=` 选择器（2026-10-16 实测的保护页只有 class：
+#      `<div class="detail-message">很抱歉，数据量过大触发保护机制…</div>`）。
+# 只认 `id=` 时新版页面读出来是空串，平台原因（含可执行指令）被整条丢掉。
+# ⚠ 两遍扫描、**id 优先**：两种写法同时出现时仍取 id 那份（它带错误码与原始 SQL）。
 _HTML_ERROR_MSG = re.compile(
-    r"""id=["'](detail-message|simple-message)["'][^>]*>(.*?)</div>""", re.S)
+    r"""id=["'](detail-message|simple-message)["'][^>]*>(.*?)</div>""", re.S | re.I)
+_HTML_ERROR_MSG_CLASS = re.compile(
+    r"""class=["'](detail-message|simple-message)["'][^>]*>(.*?)</div>""", re.S | re.I)
+
+#: 平台出错页的**结构标记**（与 `出错页面`/`Oops!!!` 并列的出错页证据）。
+#: ⚠ 只在**开头是 HTML 形态**（`_looks_like_html_head`）时才当证据，绝不单独用：
+#: 合法 CSV 的备注列里完全可能出现「出错页面」这类字样（0.10.3 误杀事故）。
+#: 本批新增的是**只有 `class=` 选择器**的保护页模板族（2026-10-16 实测）——它没有「出错页面」字样；
+#: 老语料的 `id=` 页若不带「出错页面」则维持原判（走魔数分支，同样会带出平台原因），不在这里扩大改动面。
+_HTML_ERROR_PAGE_MARKERS = (
+    "出错页面".encode("utf-8"), b"oops!!!",
+    b'class="detail-message"', b"class='detail-message'",
+    b'class="simple-message"', b"class='simple-message'",
+)
 
 # 平台出错页里的本地化 key，翻成人话（detail-message 为空时只剩它们）
 _LOCALE_TEXT = {
@@ -68,26 +87,49 @@ _LOCALE_TEXT = {
 }
 
 
+def _reason_from(text: str, pat) -> str:
+    """按一个选择器正则取平台原文：`detail-message` 优先，退到 `simple-message`；空白视为无。"""
+    reason = ""
+    for match in pat.finditer(text or ""):
+        raw = html.unescape(re.sub(r"<[^>]+>", "", match.group(2))).strip()
+        is_detail = match.group(1).lower() == "detail-message"
+        if raw and (is_detail or not reason):
+            reason = raw
+        if is_detail and raw:
+            break
+    return reason
+
+
 def _html_error_reason(text: str) -> str:
     """从平台 HTML 出错页里取出**平台原文**：优先 `detail-message`，空则退到 `simple-message`，再本地化。
+
+    两种选择器写法都认（见 `_HTML_ERROR_MSG`）：老语料的 `id="detail-message"`，
+    与 2026-10-16 实测保护页的 `class="detail-message"`（只有 class、没有 id）。
+    **按「选择器族」排序，不是按 detail/simple**：先整页扫 `id=` 族（detail→simple），取不到才扫
+    `class=` 族（detail→simple）—— 即 `id="simple-message"` 与 `class="detail-message"` 同页时取 id 那份。
+    两种形式同时在页面上时仍取带错误码/原始 SQL 的那份，老行为不变。
+    空白/纯标签内容视为无 —— 老版 detail 为空时退到 simple，别给用户一片空白。
 
     接口调用（`_unwrap_json`）与导出产物校验（`assert_export_magic`）共用同一口径 ——
     两边都得能回答"平台到底说了什么"，否则用户只能自己去解产物文件。
     """
-    reason = ""
-    for match in _HTML_ERROR_MSG.finditer(text or ""):
-        raw = html.unescape(re.sub(r"<[^>]+>", "", match.group(2))).strip()
-        if raw and (match.group(1) == "detail-message" or not reason):
-            reason = raw
-        if match.group(1) == "detail-message" and raw:
-            break
+    reason = (_reason_from(text, _HTML_ERROR_MSG)
+              or _reason_from(text, _HTML_ERROR_MSG_CLASS))
     return _LOCALE_TEXT.get(reason, reason)
 
 
-#: 导出产物里出现这些错误码时，附上可执行的下一步（实测：宽表走默认分页导出必撞 11300002）
+#: 导出产物的错误原因里出现这些关键词时，附上可执行的下一步（键 = 错误码**或**原因短语）。
+#: 11300002：实测宽表走默认分页导出必撞（加 extype=simple 可解）。
+#: 「数据量过大」保护页：2026-10-16 实测——**平台内存保护**，extype=simple 不解除，
+#: 得减少查询数据量；管理员可在平台「智能运维-内存管理-模板限制」调上限。
+_MEMORY_GUARD_ADVICE = ("平台内存保护（数据量过大触发保护机制）：先在 SQL/参数上缩小查询数据量、"
+                        "或分批导出；`--params '{\"extype\":\"simple\"}'` **不解除**该保护；"
+                        "管理员可在 智能运维-内存管理-模板限制 中调整上限")
 _EXPORT_ERROR_CODE_ADVICE = {
     "11300002": "该错误码实测为宽表/大行高超出分页导出的页面设置所致，"
                 "加 `--params '{\"extype\":\"simple\"}'` 改原样导出后重试",
+    "数据量过大": _MEMORY_GUARD_ADVICE,
+    "模板限制": _MEMORY_GUARD_ADVICE,          # 同一段平台文案的另一种措辞；按下面的 seen 去重
 }
 
 
@@ -97,8 +139,10 @@ def _export_error_page_suffix(head: bytes) -> str:
     if not reason:
         return ""
     suffix = f"；平台原因: {reason}"
-    for code, advice in _EXPORT_ERROR_CODE_ADVICE.items():
-        if code in reason:
+    seen = set()
+    for key, advice in _EXPORT_ERROR_CODE_ADVICE.items():
+        if key in reason and advice not in seen:
+            seen.add(advice)
             suffix += f"；{advice}"
     return suffix
 
@@ -163,9 +207,10 @@ def assert_export_magic(path, fr_format: str):
     的话，用户得自己打开 `.bad` 文件才知道原因。
     """
     head = _read_head(path)
-    # 出错页特征串只有**在 HTML 形态的开头**才算证据（见 _looks_like_html_head）
-    if _looks_like_html_head(head) and (
-            "出错页面".encode("utf-8") in head or b"Oops!!!" in head):
+    # 出错页证据 = **开头是 HTML 形态** 且 命中结构标记/特征串（见 _HTML_ERROR_PAGE_MARKERS）。
+    # ⚠ 两道条件缺一不可：只认"窗口里出现过特征串"会误杀合法 CSV（0.10.3 实测事故）。
+    if _looks_like_html_head(head) and any(
+            m in head.lower() for m in _HTML_ERROR_PAGE_MARKERS):
         raise ExportError(f"导出产物是平台出错页，不是报表: {path}"
                           f"{_export_error_page_suffix(head)}")
     if fr_format in ("text", "csv"):

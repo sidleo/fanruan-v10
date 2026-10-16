@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.6
+version: 0.10.7
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -306,11 +306,30 @@ frcli schedule setting
 | png（image） | `\x89PNG` | |
 | csv（text） | 无魔数 | 靠内容判断 |
 | 出错页 | HTML，含 `出错页面` / `Oops!!!` / `detail-message` | 200 + HTML，不看魔数会当成功 |
+| 出错页（另一模板族） | HTML，首字节就是 `<!doctype html>`，含 `class="detail-message"` / `class="simple-message"` | **没有**「出错页面」字样，只有一个「很抱歉…」+ 具体原因，见下 |
 | **排队页** | HTML，含 `Dec-Waiting_In_Line` | 并发/限流时的「排队中」页，**无 title 无 detail-message**，2KB 左右；重试一次通常即成功，批量导出要降并发（0.6.0 起 `export` 会识别并报错） |
 
 出错页的 `detail-message` 是 html 实体编码的**具体报错**（错误代码 + 原始 SQL），解码后可直接定位坏数据集。
-⚠️ 该属性有**单引号**（`id='detail-message'`）和双引号两种写法，解析要都认（0.6.0 前只认双引号，单引号页会退化成
+⚠️ 该文本有**单引号**（`id='detail-message'`）和双引号两种写法，解析要都认（0.6.0 前只认双引号，单引号页会退化成
 「响应不是 JSON」这种没用的提示）。
+
+⚠️ **选择器也有两种写法**，两种都要认（0.10.7 起按 `(?:id|class)=` 匹配）：
+老语料是 `<div id="detail-message">错误代码:11300002 …</div>`；2026-10 实测的**内存保护页**只有 class：
+
+```html
+<div class="simple-message">非常抱歉，无法查看该页面</div>
+<div class="detail-message">很抱歉，数据量过大触发保护机制，请减少查询数据量。若您是管理员，可于智能运维-内存管理-模板限制中更改此项限制。</div>
+```
+
+这个模板族**没有**「出错页面」字样 ⇒ 出错页判据是「**开头是 HTML 形态**（`_looks_like_html_head`）**且** 命中
+结构标记/特征串」，**不是**"64KB 窗口里出现过特征串"（后者会把合法 CSV 的备注列误判成坏产物，0.10.3 实测事故）。
+
+撞上内存保护页时，`EXPORT_ERROR` 会带出平台原文**并附可执行建议**（`extype=simple` 不解除该保护）：
+
+```
+导出产物是平台出错页，不是报表: out/big.xlsx；平台原因: 很抱歉，数据量过大触发保护机制，请减少查询数据量。若您是管理员，可于智能运维-内存管理-模板限制中更改此项限制。；
+平台内存保护（数据量过大触发保护机制）：先在 SQL/参数上缩小查询数据量、或分批导出；`--params '{"extype":"simple"}'` **不解除**该保护；管理员可在 智能运维-内存管理-模板限制 中调整上限
+```
 
 0.10.3 起 `EXPORT_ERROR` **把平台原文带出来**，不必自己去解 `.bad` 文件（`detail-message` 实测落在 4KB 级页面的后半段，
 只看前 512B 会漏掉）：
@@ -833,6 +852,7 @@ frcli export batch ./manifest.yaml     # → monthly_review_20260430.xlsx / _202
 | `读取报表数据集 xxx失败: 错误代码:11300001 数据集 [y] 配置错误…` | 该模板里有坏数据集，平台原文已给出**坏数据集名 + SQL 报错**；这是报表本身的问题，不是 CLI 故障（§6.5） |
 | 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，报错里已带平台原文的 `detail-message`（§6.1） |
 | `导出产物是平台出错页…平台原因: 错误代码:11300002…` | 宽表走默认分页导出所致：加 `--params '{"extype":"simple"}'` 改原样导出后重试（§6.1） |
+| `导出产物是平台出错页…平台原因: 很抱歉，数据量过大触发保护机制…` | **平台内存保护**（不是格式问题）：先缩小查询数据量/分批导出；`extype=simple` **不解除**该保护；管理员可在 智能运维-内存管理-模板限制 调整上限（§6.1） |
 | `…The read operation timed out`（导出、或 `report info/datasets/paras/download` 读模板） | 设 `FRCLI_TIMEOUT=300`（批量 600）重跑；复杂模板冷启动 50s 级，读取也会打空（§6.2） |
 | `请求失败: …Connection reset by peer` / `broken pipe` | **不是超时**：原样重试即成功（批量里失败的那几条单独重试）；调大 `FRCLI_TIMEOUT` 无效（§6.19c） |
 | `请求失败: 503 Service Unavailable（…本机 HTTP 代理链路故障…）` | 失败在**本机 HTTP 代理这一跳**（`httpx.ProxyError`），不是平台故障：查代理/VPN 与节点；`server test` 走同一代理，只能复核（§6.19c） |
