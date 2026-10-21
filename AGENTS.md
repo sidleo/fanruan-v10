@@ -415,6 +415,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 无新增失败；至少 1 条只读命令真实跑通。**历史遗留**：`test_config.py` 的 `test_load_empty_config` / `test_list_instances_empty` 在固定失败 —— 它们只 patch 了 `config.DEFAULT_CONFIG_PATH`，而 `load_full_config()` 走 `CONFIG_SEARCH_PATHS` 会落回真实 `~/.frcli/config.yaml`（实测环境有 `yh` 实例），与本次搬迁无关 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 612 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |
