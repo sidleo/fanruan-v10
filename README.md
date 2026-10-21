@@ -160,7 +160,7 @@ CLI 输出为 JSON（`-f table` 为表格），便于 agent 解析：
 
 - 配置搜索顺序：`$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml`
 - token 缓存：`~/.frcli/tokens/<实例>.json`（默认 24h；认证失效——401/403 **或 302→CAS 登录页**——自动清缓存重登一次）
-- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30，复杂报表导出调大）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
+- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
 
 ```yaml
 default: yh

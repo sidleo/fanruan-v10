@@ -39,6 +39,7 @@ import httpx
 
 from . import jser
 from .jser import JObject
+from .neterr import net_hint
 from .rdcrypto import encrypt_password
 from .exceptions import ApiError, AuthError, ConnectionError
 
@@ -195,10 +196,14 @@ class RemoteDesignSession:
             pass
 
     def _post(self, path, **kwargs):
+        # 传输失败与请求跳共用同一套分类（超时 / 被重置 / 代理故障）；但远程设计有自己的
+        # 超时变量 FRCLI_RD_TIMEOUT（默认 300s），调 FRCLI_TIMEOUT 对它无效 —— 提示里必须
+        # 给对变量，否则用户会照着旧文案把 FRCLI_TIMEOUT 一路调大却毫无效果。
         try:
             return self._http.post(path, **kwargs)
         except httpx.RequestError as e:
-            raise ConnectionError(f"远程设计请求失败: {e}")
+            raise ConnectionError(
+                f"远程设计请求失败: {net_hint(e, timeout_env='FRCLI_RD_TIMEOUT', timeout_default='300')}")
 
     @staticmethod
     def _unwrap(resp, what):

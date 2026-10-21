@@ -65,30 +65,35 @@ def is_proxy_5xx(resp) -> bool:
     return resp.status_code >= 500 and bool(resp.headers.get("proxy-status"))
 
 
-def net_hint(e: Exception) -> str:
+def net_hint(e: Exception, timeout_env: str = "FRCLI_TIMEOUT",
+             timeout_default: str = "30.0") -> str:
     """网络类异常的**可操作**提示。
 
     默认超时 30s 对真实报表偏短（复杂模板实测要 300~900s），而这个报错原文只有
     `The read operation timed out`，看不出"只是超时、调大就行" —— 2026-09 两个会话
     都在这里反复试参数、怀疑报表有问题。所以直接把当前值与调法写进消息。
 
-    三类要分开：**超时**（调大 FRCLI_TIMEOUT）、**连接被重置/断开**（原样重试，调超时无用）、
+    三类要分开：**超时**（调大对应超时变量）、**连接被重置/断开**（原样重试，调超时无用）、
     **本机代理故障**（查代理/VPN 链路，与平台会话无关）。混成一句会把人带沟里。
 
     请求路径（`client._request`）与登录路径（`auth.TokenManager.login`）共用本函数，
-    保证同一故障在两处给出同一份建议。
+    保证同一故障在两处给出同一份建议；**远程设计通道**（`remotedesign.py`）也走这里，
+    但它的超时是独立变量（`timeout_env="FRCLI_RD_TIMEOUT"`、默认 300s）—— 用错变量会让人
+    调 `FRCLI_TIMEOUT` 却毫无效果。
     """
-    cur = os.environ.get("FRCLI_TIMEOUT", "30.0")
+    cur = os.environ.get(timeout_env, timeout_default)
     text = str(e)
     if isinstance(e, httpx.ProxyError):
-        return f"{text}{PROXY_HINT}"
+        # 既有请求跳/登录跳的代理文案必须逐字符不变；只有 RD 等非默认超时变量才替换变量名
+        hint = PROXY_HINT if timeout_env == "FRCLI_TIMEOUT" else PROXY_HINT.replace("FRCLI_TIMEOUT", timeout_env)
+        return f"{text}{hint}"
     if isinstance(e, httpx.TimeoutException) or "timed out" in text.lower():
-        return (f"{text}（当前超时 {cur}s；复杂报表属正常，用 `FRCLI_TIMEOUT=600 frcli ...` 调大后原样重试，"
+        return (f"{text}（当前超时 {cur}s；复杂报表属正常，用 `{timeout_env}=600 frcli ...` 调大后原样重试，"
                 f"不要先怀疑报表或改参数）")
     if is_conn_reset(e, text):
-        return (f"{text}（连接被对端重置/断开，这不是超时——调大 FRCLI_TIMEOUT 无效。"
+        return (f"{text}（连接被对端重置/断开，这不是超时——调大 {timeout_env} 无效。"
                 f"同一命令原样重试通常即成功（服务端渲染大报表耗时较长时偶发被掐断）；"
                 f"批量导出里失败的那几条单独重试即可，先别改参数、也别怀疑报表。"
                 f"反复出现再查链路：本机代理/VPN 是否稳定、服务端是否限连接数）")
     return (f"{text}（当前超时 {cur}s；若为连接类问题先 `frcli server test` 确认会话，"
-            f"必要时 `FRCLI_TIMEOUT=600` 调大重试）")
+            f"必要时 `{timeout_env}=600` 调大重试）")

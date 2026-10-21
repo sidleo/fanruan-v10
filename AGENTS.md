@@ -171,6 +171,12 @@ fanruan_v10/
 登录是 POST、链路故障通常非瞬时，**登录不自动重试**；非传输层错误（坏 JSON、token 落盘失败）
 仍报原文，不套网络话术。
 
+**远程设计通道（模板读写）同样按这三类分类，但超时变量是 `FRCLI_RD_TIMEOUT`（默认 300s），与 `FRCLI_TIMEOUT` 无关**：
+`report upload/delete/download/cell/table/crosstab/image/sheet` 等走远程设计 RPC 的命令都算（`report new` 仅 `--from`/`--apply` 时走 RD，默认本地 dry-run）。
+旧文案只给裸异常（`远程设计请求失败: Server disconnected…`），用户照通用超时提示调 `FRCLI_TIMEOUT` 毫无效果
+（2026-10 真实会话 `report image` 实测）。`remotedesign._post` 已改为
+`net_hint(e, timeout_env="FRCLI_RD_TIMEOUT", timeout_default="300")` —— 新增走远程设计的命令不要再自己拼异常文案。
+
 ### 导出产物的"出错页"判定必须看**开头**，不能看"窗口里出现过"
 
 读取窗口由 512B 放宽到 64KB（0.10.3 为取 `detail-message`）时，**正文串判定必须同步收紧**：
@@ -221,12 +227,13 @@ fanruan_v10/
 
 要最新记录用 `schedule record`（倒序）或放大 `-n` 后取最后一条。
 
-### 默认 30s 超时，复杂报表必然超时（导出与模板读取都吃它）
+### 默认 30s 超时，复杂报表必然超时（导出与 REST 读取都吃它）
 
 同一张报表默认超时 → `导出请求失败: The read operation timed out`；`FRCLI_TIMEOUT=300` → 50s 成功导出 225KB xlsx。
-超时由环境变量 `FRCLI_TIMEOUT` 控制（`client.py` 读取）。**模板读取命令同样吃这个默认值**：
-`report info / datasets / paras / download` 由服务端解析模板（含数据集校验），复杂模板**冷启动**实测 50s 级、
+超时由环境变量 `FRCLI_TIMEOUT` 控制（`client.py` 读取）。**REST 读取命令同样吃这个默认值**：
+`report info / datasets / paras` 由服务端解析模板（含数据集校验），复杂模板**冷启动**实测 50s 级、
 同一命令紧接着重跑约 18s（服务端已缓存）⇒ 动手前先设 `FRCLI_TIMEOUT=300`，别等第一次打空。
+**例外：远程设计通道的命令（读模板字节的 `report download`、`report image`，以及改模板类）超时读 `FRCLI_RD_TIMEOUT`（默认 300s）**，见上文「远程设计通道」一段。
 
 ### 报表路径约定
 
@@ -415,6 +422,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 612 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 624 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |
