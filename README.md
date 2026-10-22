@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.10.13（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析）
+- **版本**：0.10.14（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示）
 
 ## 安装 / 自举
 

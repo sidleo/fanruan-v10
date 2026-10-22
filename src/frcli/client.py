@@ -616,6 +616,11 @@ class FineReportClient:
             raise ConnectionError(f"导出请求失败: {_net_hint(e)}")
 
         if resp.status_code != 200:
+            if resp.status_code in (502, 503, 504):
+                raise ExportError(
+                    f"导出失败: HTTP {resp.status_code}（平台网关/上游超时或不可用，常见于服务端初始化/繁忙、"
+                    "大报表并发导出）。先 `frcli server test` / `system health` 看平台状态；"
+                    "单条稍后重试通常即成功，批量导出请降低并发；不要改报表参数")
             raise ExportError(f"导出失败: HTTP {resp.status_code}")
 
         # 平台在并发/限流时返回「排队中」页面而不是报表：200 + 2KB 左右 HTML，

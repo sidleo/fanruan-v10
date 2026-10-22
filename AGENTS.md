@@ -138,6 +138,8 @@ fanruan_v10/
 ### 导出「成功」可能是 HTML 出错页面
 
 `export` 只看 HTTP 状态码；FineReport 出错时返回 **200 + HTML 出错页面**，CLI 照写文件并报 `status: ok`。
+**HTTP 502/503/504 是平台网关/上游超时**（服务端初始化/繁忙、大报表并发），不是模板坏：0.10.14 起提示先查
+`server test`/`system health`、单条稍后重试、批量降并发，不要改报表参数（2026-10-22 真实会话并发导出两条都撞 504）。
 判据：xlsx = `PK\x03\x04`、pdf = `%PDF`、png = `\x89PNG`、**word 是 RTF（`{\rtf1`，不是 docx 的 PK）**；
 失败形态有**两种**且都不带 title：出错页（含 `出错页面` / `Oops!!!` / `detail-message`）与
 **排队页**（`Dec-Waiting_In_Line`，约 2KB，重试一次即成功）。`export` 0.6.0 起内置魔数校验。
@@ -437,6 +439,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 655 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 659 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

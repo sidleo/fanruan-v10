@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.13
+version: 0.10.14
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -303,6 +303,11 @@ frcli schedule setting
 
 `frcli export` 只看 HTTP 状态码，而 FineReport 出错时仍返回 **200 + HTML 出错页面**，CLI 会照写文件并报 `status: ok`。
 典型触发：数据集 SQL 报错（如 `错误代码:11300001 数据集 [xxx] 配置错误 [ImpalaJDBCDriver] Could not resolve column/field reference`）、缺必填参数。
+
+⚠️ **HTTP 502/503/504 是平台网关/上游超时，不是模板坏了**（2026-10-22 真实会话：服务端初始化/繁忙时并发导出两条大报表，
+两条都报 `导出来败: HTTP 504`，同时 `system health` 的模块 detail 是 `module Initializing`）。
+0.10.14 起错误信息会提示：先 `frcli server test` / `system health` 看平台状态；单条稍后重试通常即成功；批量导出降低并发；
+**不要改报表参数**。（其它非 200 状态仍只报 `导出失败: HTTP <code>`。）
 
 **必须校验魔数**（0.6.0 起 `export` 已内置 `assert_export_magic`，不符直接报错）：
 
