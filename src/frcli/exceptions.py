@@ -45,3 +45,8 @@ class ConnectionError(FrcliError):
 class ApiError(FrcliError):
     """决策平台接口返回错误（200 + HTML 出错页，原因在 detail-message）"""
     code = "API_ERROR"
+
+
+class InspectionError(FrcliError):
+    """运行时巡检（模板性能分析）失败：插件未启用、模板没跑起来、结果等待超时等"""
+    code = "INSPECTION_ERROR"

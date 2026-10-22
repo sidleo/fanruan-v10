@@ -5,6 +5,8 @@ import re
 import html
 import ssl
 import os
+import math
+import time
 from typing import Optional, Any
 from pathlib import Path
 import httpx
@@ -19,7 +21,7 @@ from .neterr import (
 )
 from .exceptions import (
     FrcliError, AuthError, ConnectionError,
-    ReportNotFoundError, ExportError, ApiError
+    ReportNotFoundError, ExportError, ApiError, InspectionError
 )
 
 
@@ -269,6 +271,108 @@ def _unwrap_json(resp: httpx.Response, what: str) -> Any:
     raise ApiError(f"{what}失败: HTTP {resp.status_code}，响应不是 JSON")
 
 
+# ========== 运行时巡检（模板性能分析插件 com.fr.plugin.ins） ==========
+# 平台链路（2026-10 真机实测，服务端 10.0.19 + fr-plugin-inspection 1.3.4）：
+#   ① GET /decision/plugin/inspect/x/run?viewlet=<模板>&op=page|view
+#      返回预览页壳，里面 window.Nx.sid="<巡检会话id>"、sessionID=<模板会话uuid>
+#   ② GET /decision/view/report?op=page_content&sessionID=<模板会话uuid>&pn=1
+#      **真正触发模板计算**；少了这步巡检会话永远停在 PREPARED（结果页报「检测未被触发」）
+#   ③ 轮询 GET /decision/plugin/inspect/x/report/<巡检sid>
+#      页面里 Nx.result = JSON.parse('<JS 转义字符串>')，解一层才是分析 JSON
+# 只读边界：op 只允许 page / view；write / write_plus 会触发填报写操作，禁止开放。
+INSPECTION_STATUS_TEXT = {
+    "0": "正常，所有检测点均生效",
+    "1": "警告，部分检测点未生效",
+    "2": "错误，关键检测点未生效",
+    "-1": "稍候，检测点状态获取中",
+    "-2": "错误，未知检测点状态",
+}
+_INSPECTION_SID_RE = re.compile(r'window\.Nx\.sid\s*=\s*"([^"]+)"')
+_INSPECTION_SESSION_RE = re.compile(r"sessionID=([0-9a-fA-F-]{36})")
+_INSPECTION_RESULT_START = re.compile(r"Nx\.result\s*=\s*JSON\.parse\('")
+
+#: JS 字符串里不合法但会被平台写出的转义（JSON.parse 的入参之前要先解掉）
+_JS_SIMPLE_ESCAPES = {
+    '"': '"', "'": "'", "\\": "\\", "/": "/",
+    "n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f",
+}
+
+
+def _js_unescape(raw: str) -> str:
+    """解一层 JS 字符串转义（`\\/`→`/`、`\\'`→`'`、`\\uXXXX`→字符…）。
+
+    平台把分析结果塞进 `JSON.parse('…')`，里面会带 `\\/` 这类 JSON 不认的转义，
+    直接 `json.loads` 会报 `Invalid \\escape`。
+    """
+    out = []
+    i = 0
+    n = len(raw)
+    while i < n:
+        ch = raw[i]
+        if ch != "\\":
+            out.append(ch)
+            i += 1
+            continue
+        nxt = raw[i + 1] if i + 1 < n else ""
+        if nxt == "u":
+            code = raw[i + 2:i + 6]
+            try:
+                out.append(chr(int(code, 16)))
+            except ValueError:
+                raise InspectionError(f"巡检结果里出现非法 Unicode 转义: \\u{code}")
+            i += 6
+            continue
+        out.append(_JS_SIMPLE_ESCAPES.get(nxt, nxt))
+        i += 2
+    return "".join(out)
+
+
+def decode_inspection_result(page: str) -> Optional[dict]:
+    """从巡检结果页解出分析 JSON；还没出结果/是错误页时返回 None。
+
+    结果页有两种写法，都要认：
+    ① 正常：`Nx.result = JSON.parse('<JS 转义字符串>')`（当前版本实测）
+    ② 兜底：`Nx.result = {...};`（直接 JSON，防插件改版）
+    """
+    match = _INSPECTION_RESULT_START.search(page or "")
+    raw = None
+    if match:
+        i = match.end()
+        buf = []
+        n = len(page)
+        while i < n:
+            ch = page[i]
+            if ch == "\\":
+                buf.append(page[i:i + 2])
+                i += 2
+                continue
+            if ch == "'":
+                raw = "".join(buf)
+                break
+            buf.append(ch)
+            i += 1
+        if raw is None:
+            raise InspectionError("巡检结果页不完整（Nx.result 字符串未闭合）")
+        if not raw.strip():
+            return None  # JSON.parse('')：还没写结果，继续轮询
+    else:
+        direct = re.search(r"Nx\.result\s*=\s*(\{.*?\})\s*;", page or "", re.S)
+        if not direct:
+            return None
+        try:
+            return json.loads(direct.group(1))
+        except ValueError:
+            return None
+    try:
+        parsed = json.loads(_js_unescape(raw))
+    except ValueError as e:
+        raise InspectionError(f"巡检结果解析失败：Nx.result 不是合法 JSON（{e}）") from e
+    if not isinstance(parsed, dict):
+        raise InspectionError(
+            f"巡检结果格式异常：Nx.result 不是 JSON 对象（拿到 {type(parsed).__name__}）")
+    return parsed
+
+
 class FineReportClient:
     """FineReport HTTP API 客户端"""
 
@@ -362,6 +466,108 @@ class FineReportClient:
 
     def _post(self, path: str, **kwargs) -> httpx.Response:
         return self._request("POST", path, **kwargs)
+
+    # ========== 运行时巡检（模板性能分析） ==========
+
+    def get_inspection_status(self) -> dict:
+        """巡检插件状态（`GET /decision/plugin/inspect/status/get`）：检测点是否生效。"""
+        self._ensure_auth()
+        url = f"{self.config.workspace}/decision/plugin/inspect/status/get"
+        resp = self._request("GET", url)
+        if resp.status_code == 404:
+            raise InspectionError(
+                "巡检插件未安装/未启用（com.fr.plugin.ins）：接口 /plugin/inspect/status/get 返回 404")
+        try:
+            data = _unwrap_json(resp, "读取巡检状态")
+        except ApiError as e:
+            raise InspectionError(f"巡检插件不可用（com.fr.plugin.ins）：{e}") from e
+        return data.get("data") or {}
+
+    def run_inspection(self, report_path: str, op: str = "page", params: dict = None,
+                       timeout: float = None) -> dict:
+        """运行时巡检（模板性能分析）：真实执行一次模板计算，**内部等待结果就绪**后返回。
+
+        - `op`：`page`（分页预览）/ `view`（分析预览，含数据源取数耗时）；禁止 write/write_plus（会写填报）。
+        - `params`：模板参数（同 `export --params`），在发起巡检时就带上。
+        - `timeout`：等待结果上限秒数；缺省读 `FRCLI_INSPECT_TIMEOUT`（60s）。
+          模板计算本身仍受 `FRCLI_TIMEOUT` 约束（复杂模板记得调大）。
+        - 返回完整的分析 JSON（`meta`/`extra`/`cell`），其中 `meta.para` 含账号与组织，
+          命令层默认剔除，只有 `--raw` 才原样输出。
+        """
+        if op not in ("page", "view"):
+            raise InspectionError(
+                f"不支持的巡检类型: {op}（只允许 page / view；write / write_plus 会触发填报写操作）")
+        wait_seconds = timeout if timeout is not None else float(
+            os.environ.get("FRCLI_INSPECT_TIMEOUT", "60"))
+        # NaN / inf / 负数会让「剩余时间」判断永不成立 → 死等；统一夹成 0（= 先 poll 一次再报超时）
+        if not math.isfinite(wait_seconds) or wait_seconds < 0:
+            wait_seconds = 0.0
+        self._ensure_auth()
+
+        # `--params` 是模板参数，**不能覆盖保留键**（否则 param op=write_plus/viewlet=… 会绕过只读白名单）
+        run_params = dict(params or {})
+        run_params["viewlet"] = report_path
+        run_params["op"] = op
+        run_url = f"{self.config.workspace}/decision/plugin/inspect/x/run"
+        resp = self._request("GET", run_url, params=run_params)
+        if resp.status_code == 404:
+            raise InspectionError(
+                "巡检插件未安装/未启用（com.fr.plugin.ins）：接口 /plugin/inspect/x/run 返回 404")
+        if resp.status_code != 200:
+            raise InspectionError(f"巡检请求失败: HTTP {resp.status_code}")
+        sid_match = _INSPECTION_SID_RE.search(resp.text)
+        session_match = _INSPECTION_SESSION_RE.search(resp.text)
+        if not sid_match or not session_match:
+            if not (resp.text or "").strip():
+                # 实测：模板路径不存在时 run 返回 200 + 空响应（异常被平台吞掉，只进服务端日志）
+                raise InspectionError(
+                    "巡检没有启动：服务端返回空响应（模板路径不存在 / 无模板权限 / 插件异常）。"
+                    "先用 `frcli report info <模板>` 或 `frcli report list <目录>` 确认路径")
+            reason = _html_error_reason(resp.text)
+            hint = f"；平台原因: {reason}" if reason else ""
+            raise InspectionError(
+                "巡检没有启动：返回页里找不到巡检会话 id（插件未启用 / 模板不存在 / 无模板权限）" + hint)
+        sid = sid_match.group(1)
+        template_session = session_match.group(1)
+
+        # ② 真正触发模板计算：缺这步巡检会话永远停在 PREPARED（结果页报「检测未被触发」）
+        content_url = f"{self.config.workspace}/decision/view/report"
+        content = self._request(
+            "GET", content_url,
+            params={"op": "page_content", "sessionID": template_session, "pn": 1})
+        if content.status_code != 200:
+            raise InspectionError(f"巡检触发模板计算失败: HTTP {content.status_code}")
+
+        # ③ 轮询结果（内部退避，调用方不需要 sleep / 猜时间）
+        # 等待预算只算「轮询等待」：模板计算时间归 FRCLI_TIMEOUT 管（文档口径一致）
+        started = time.monotonic()
+        report_url = f"{self.config.workspace}/decision/plugin/inspect/x/report/{sid}"
+        delay = 0.2
+        last_reason = "巡检结果尚未生成"
+        while True:
+            poll = self._request("GET", report_url)
+            if poll.status_code != 200:
+                raise InspectionError(f"读取巡检结果失败: HTTP {poll.status_code}")
+            result = decode_inspection_result(poll.text)
+            if result is not None:
+                return result
+            text = poll.text or ""
+            if "检测未被触发" in text:
+                last_reason = ("会话仍停在「检测未被触发」——模板计算没有跑起来"
+                               "（缺参数 / 模板报错 / 权限不足 / 插件未就绪）")
+            elif "尚未完成" in text or "未完成" in text:
+                last_reason = "巡检结果尚未生成"
+            else:
+                reason = _html_error_reason(text)
+                last_reason = f"巡检返回异常页{('：' + reason) if reason else ''}"[:300]
+            # 先轮询再判超时：至少发一次请求（结果通常第一次就有），避免 0 超时误判
+            remaining = wait_seconds - (time.monotonic() - started)
+            if remaining <= 0:
+                raise InspectionError(
+                    f"巡检结果等待超时（{wait_seconds:g}s，可用 FRCLI_INSPECT_TIMEOUT 调大）"
+                    f"：{last_reason}")
+            time.sleep(min(delay, max(remaining, 0)))
+            delay = min(delay * 1.6, 1.0)
 
     # ========== 连接测试 ==========
 

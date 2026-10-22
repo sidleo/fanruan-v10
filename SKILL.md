@@ -1,7 +1,7 @@
 ---
 name: fanruan-v10
-version: 0.10.12
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+version: 0.10.13
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
     bins: ["frcli"]
@@ -135,6 +135,14 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── modules [--keyword K]                决策平台模块树
 │   ├── authority                            权限开关（分级授权/报表编辑/调度…）
 │   └── login-policy                         登录配置 + 密码策略 + 密码到期提醒
+│
+├── inspect                         运行时巡检/模板性能分析（插件 com.fr.plugin.ins）
+│   ├── status [-f]                         插件状态：检测点是否生效（🟢 只读）
+│   └── run REPORT [--op page|view] [--params JSON] [--timeout S] [--raw] [-f]
+│                                           巡检一张模板：**内部触发计算 + 轮询结果**，
+│                                           调用方不用 sleep / 猜等待时间（见 §6.22）
+│                                           ⚠️ 会真实执行一次模板；op 只允许 page/view
+│                                           ⚠️ 默认剔除 meta.para（工号/组织）；--raw 才原样输出
 │
 ├── entry                           平台条目与消息（🟢 只读）
 │   │   ⚠️ 条目树 id 是 UUID，与 report 的报表目录树（id = 文件路径）是两套
@@ -797,6 +805,38 @@ frcli export batch ./manifest.yaml     # → monthly_review_20260430.xlsx / _202
 无 token 缓存时失败落在登录这一跳，不共用分类就会裸报 `503 Service Unavailable`，看不出是代理还是超时；
 登录响应若是 **5xx + `Proxy-Status`** 也按代理故障报，不再是干巴巴的 `登录失败: HTTP 503`。
 登录是 POST、链路故障通常也不是瞬时问题，**不自动重试**。
+
+### 6.22 运行时巡检（`frcli inspect`）：内部触发计算 + 轮询，不让 agent 猜时间
+
+`frcli inspect run` 对接平台的「模板性能分析」插件（`com.fr.plugin.ins`）：真实执行一次模板，
+给出整体耗时、各环节计数/耗时与逐单元格耗时，用来定位慢模板/慢单元格。
+
+**调用方只发一条命令**，等待逻辑全部在 CLI 内部（退避轮询，不让 agent 自己 `sleep` 猜结果好了没）：
+
+```bash
+FRCLI_TIMEOUT=300 frcli inspect run "demo_group/demo_user/x.cpt"               # 分页预览（page）
+FRCLI_TIMEOUT=300 frcli inspect run "demo_group/demo_user/x.cpt" --op view     # 分析预览，含 db fetch
+frcli inspect run "…/x.cpt" --params '{"edate":"20260131"}' --timeout 120      # 带模板参数 + 等待上限
+frcli inspect status                                                          # 插件状态（只读）
+```
+
+**平台链路**（排查插件/接口问题时看；CLI 已封装）：
+
+1. `GET …/decision/plugin/inspect/x/run?viewlet=<模板>&op=page|view` → 预览页壳，含
+   `window.Nx.sid`（巡检会话）与 `sessionID=<模板会话>`；
+2. `GET …/decision/view/report?op=page_content&sessionID=<模板会话>&pn=1` → **真正触发模板计算**；
+3. 轮询 `GET …/decision/plugin/inspect/x/report/<巡检sid>` → `Nx.result = JSON.parse('<JS 转义串>')`。
+
+坑：
+
+- **只调第 1 步永远拿不到结果**：巡检会话停在 PREPARED，结果页报「检测未被触发」——必须第 2 步让模板真算一次。
+- 结果里 `meta.para` 带**工号、组织、会话参数**；命令默认剔除（只给 `meta.date`），`--raw` 才原样输出。
+- `op` 只允许 `page` / `view`；`write`/`write_plus` 是**填报写操作**，不开放。
+- `--params` 只放**模板参数**；`op` / `viewlet` 是保留键，不会被 `--params` 覆盖（防止参数名撞车绕过白名单）。
+- 模板计算本身受 `FRCLI_TIMEOUT`（默认 30s）；等待结果上限是 `FRCLI_INSPECT_TIMEOUT`（默认 60s）。
+- 模板路径不存在时平台 `run` 返回 **200 + 空响应**（异常被吞、只进服务端日志）；命令会提示先用 `report info/list` 确认路径。
+- 插件未安装/未启用时端点 404 或返回错误页；`inspect status` 的 `status` 码：
+  `0` 正常 / `1` 部分检测点未生效 / `2` 关键点未生效 / `-1` 获取中 / `-2` 未知。
 
 ### 6.19c0 会话巡检工具（`tools/scan_sessions.py`）
 

@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.10.0（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`）
+- **版本**：0.10.13（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析）
 
 ## 安装 / 自举
 
@@ -118,6 +118,17 @@ frcli attach upload /tmp/说明.docx --name 说明.docx   # → 返回 attach_id
 frcli attach remove default1789441975426_Olw7l        # 用完清理
 ```
 
+## 运行时巡检（模板性能分析）
+
+```bash
+frcli inspect status                     # 插件状态：检测点是否生效（只读）
+# 真实执行一次模板，输出整体/环节/单元格耗时；等待由 CLI 内部完成（退避轮询），不用自己 sleep
+FRCLI_TIMEOUT=300 frcli inspect run "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --op page
+FRCLI_TIMEOUT=300 frcli inspect run "…/sales_daily.cpt" --op view --params '{"edate":"20260131"}'
+```
+
+`run` 默认输出会剔除 `meta.para`（工号/组织/会话参数），`--raw` 才原样输出；`op` 只允许 `page` / `view`（`write` 是填报写操作）。
+
 ## 命令组概览
 
 | 命令组 | 用途 | 主要命令 |
@@ -127,6 +138,7 @@ frcli attach remove default1789441975426_Olw7l        # 用完清理
 | `export` | 报表导出 | `pdf` / `excel` / `word` / `image` / `csv` / `batch` |
 | `attach` | 服务器附件 | `upload` / `remove`（附件缓存，不动报表目录） |
 | `system` | 系统与平台信息 | `version` / `health` / `modules` / `authority` / `login-policy` |
+| `inspect` | 运行时巡检（模板性能分析，真实执行一次模板） | `status` / `run`（`--op page\|view`，内部等待结果） |
 | `entry` | 平台条目与消息 | `list` / `roots` / `all` / `messages` |
 | `user` | 用户与组织 | `list` / `me` / `departments` / `posts` |
 | `schedule` | 定时任务 | `list` / `tasks` / `get` / `exists` / `executing` / `create` / `update` / `delete` / `run` / `history` / `record` / `records` / `log` / `setting` |
@@ -160,7 +172,7 @@ CLI 输出为 JSON（`-f table` 为表格），便于 agent 解析：
 
 - 配置搜索顺序：`$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml`
 - token 缓存：`~/.frcli/tokens/<实例>.json`（默认 24h；认证失效——401/403 **或 302→CAS 登录页**——自动清缓存重登一次）
-- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
+- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_INSPECT_TIMEOUT`（秒，默认 60；`inspect run` 等待巡检结果上限，模板计算本身仍受 `FRCLI_TIMEOUT` 约束）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
 
 ```yaml
 default: yh

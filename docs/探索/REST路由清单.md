@@ -5,7 +5,7 @@
 
 - 路由条目 **961** 条，涉及控制器 **153** 个
 - 纯 GET（只读候选）**410** 条
-- frcli 已覆盖 **84** 条，未覆盖 **877** 条
+- frcli 已覆盖 **87** 条，未覆盖 **874** 条
 
 ## 全部路由
 
@@ -204,11 +204,11 @@
 | `/plugin/inspect/metric/plugin/inspect/metric` | ANY |  |  | `com.fr.ins.web.api.InsMetricResource#add` |
 | `/plugin/inspect/resources/**` | GET | ✅ |  | `com.fr.ins.web.api.InsResourcesRequestResource#getResources` |
 | `/plugin/inspect/resources/**/plugin/inspect/resources/**` | ANY |  |  | `com.fr.ins.web.api.InsResourcesRequestResource#getResources` |
-| `/plugin/inspect/status/get` | GET | ✅ |  | `com.fr.ins.web.api.InsServerStatusResource#getStatus` |
+| `/plugin/inspect/status/get` | GET | ✅ | ✅ | `com.fr.ins.web.api.InsServerStatusResource#getStatus` |
 | `/plugin/inspect/status/plugin/inspect/status` | ANY |  |  | `com.fr.ins.web.api.InsServerStatusResource#getStatus` |
 | `/plugin/inspect/x/plugin/inspect/x` | ANY |  |  | `com.fr.ins.web.api.InspectionResource#report` |
-| `/plugin/inspect/x/report/{sid}` | GET | ✅ |  | `com.fr.ins.web.api.InspectionResource#report` |
-| `/plugin/inspect/x/run` | GET | ✅ |  | `com.fr.ins.web.api.InspectionResource#directRun` |
+| `/plugin/inspect/x/report/{sid}` | GET | ✅ | ✅ | `com.fr.ins.web.api.InspectionResource#report` |
+| `/plugin/inspect/x/run` | GET | ✅ | ✅ | `com.fr.ins.web.api.InspectionResource#directRun` |
 | `/plugin/private/com.fr.plugin.mobile.web/settings` | GET | ✅ |  | `com.fr.plugin.mobile.web.server.handler.Html5GetConfigsHandler#handle` |
 | `/plugin/private/com.fr.plugin.mobile.web/settings` | PUT |  |  | `com.fr.plugin.mobile.web.server.handler.Html5SetConfigsHandler#handle` |
 | `/plugin/private/{pluginId}/**` | ANY |  |  | `com.fr.web.controller.plugin.PluginPrivateService#handle` |

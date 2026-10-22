@@ -5,7 +5,7 @@
 
 ## 项目定位
 
-`fanruan_v10` skill 封装 `frcli` —— 与 FineReport V10 决策平台交互的 CLI（server / report / export / attach / system / entry / user / schedule 8 个命令组）。
+`fanruan_v10` skill 封装 `frcli` —— 与 FineReport V10 决策平台交互的 CLI（server / report / export / attach / system / inspect / entry / user / schedule 9 个命令组）。
 目标是让 agent 不构造 JSON、不猜接口路径，只调固定命令。
 
 - CLI 源码（唯一来源）：`src/frcli/`；skill 入口：`SKILL.md`；打包：`pyproject.toml`（src 布局）
@@ -39,7 +39,7 @@ fanruan_v10/
 │   ├── remotedesign.py   # 远程设计通道：服务端模板读写（report upload/delete 的后端）
 │   ├── jser.py           # 手写 Java 对象序列化（远程设计 RPC 载荷/应答编解码）
 │   ├── rdcrypto.py       # 纯 Python AES-ECB / SM4-ECB（握手密码加密，零依赖）
-│   └── commands/         # server / report / export / attach / system / entry / user / schedule
+│   └── commands/         # server / report / export / attach / system / inspect / entry / user / schedule
 ├── references/
 │   ├── install.md        # 自检 + 自举手册
 │   ├── remotedesign.md   # 远程设计 RPC 协议说明 + 用 Designer jar 复核报文的脚本
@@ -200,6 +200,16 @@ fanruan_v10/
 现在 `results` 与 `errors` 都带本次 `params` 与已展开的 `output`，`total` 是**展开后**的任务数，manifest 条数另给 `manifest_reports`。
 两个边界：`params` 给**空列表** ⇒ `EXPORT_ERROR` 明确点名是哪个参数（旧版静默丢报表：`total: 0` + exit 0，看着像跑完了）；
 多条任务展开出**同一个 output 路径** ⇒ 顶层 `warnings` 数组提示会互相覆盖（多半是 `output` 漏了 `{参数名}` 占位）。
+
+### 运行时巡检（`frcli inspect`）：必须「触发计算」+ 内部轮询，别让 agent 猜时间
+
+平台「模板性能分析」插件（`com.fr.plugin.ins`）的巡检是**三跳**：`/plugin/inspect/x/run` 只返回预览页壳
+（含巡检 `sid` 与模板 `sessionID`）；必须再请求 `/decision/view/report?op=page_content&sessionID=…` **让模板真算一次**，
+否则巡检会话停在 PREPARED，结果页永远报「检测未被触发」；最后轮询 `/plugin/inspect/x/report/<sid>` 取
+`Nx.result = JSON.parse('<JS 转义串>')`（`\/`、`\'` 这类转义要先解，直接 `json.loads` 会报 `Invalid \escape`）。
+等待逻辑内置在 `run_inspection()`（退避轮询，上限 `FRCLI_INSPECT_TIMEOUT`，默认 60s），**调用方不要 sleep 猜结果**。
+结果 JSON 的 `meta.para` 含工号/组织/会话参数，命令默认剔除（`--raw` 才输出）；`op` 只允许 `page`/`view`。
+模板路径不存在时 `run` 返回 200 + 空响应（异常被平台吞掉），错误信息里要给「先 `report info` 确认路径」的指引。
 
 ### 出错页 `detail-message` 是通用诊断/挖接口入口（**不限导出**）
 
@@ -427,6 +437,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 628 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 655 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |
