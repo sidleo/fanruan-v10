@@ -95,7 +95,7 @@ def _write(tmp_path, data: bytes, name: str):
 # ---------------------------------------------------------------------------
 def test_element_text_detail_message_reason():
     assert _html_error_reason(PROTECT_PAGE) == PROTECT_REASON
-    suffix = _export_error_page_suffix(PROTECT_PAGE.encode("utf-8"))
+    suffix = _export_error_page_suffix(PROTECT_PAGE)
     assert suffix.startswith(f"；平台原因: {PROTECT_REASON}")
 
 
@@ -105,7 +105,7 @@ def test_memory_protection_reason_gets_actionable_advice():
     平台原文只说"数据量过大触发保护机制，请减少查询数据量"；用户还需要知道
     「怎么做」（缩小/分批）与「什么不管用」（`extype=simple` **不解除**该保护）。
     """
-    suffix = _export_error_page_suffix(PROTECT_PAGE.encode("utf-8"))
+    suffix = _export_error_page_suffix(PROTECT_PAGE)
     assert "分批" in suffix or "缩小" in suffix, f"应给「怎么做」：{suffix}"
     assert "模板限制" in suffix or "内存管理" in suffix, f"应给管理员处置入口：{suffix}"
     assert "不解除" in suffix and "extype" in suffix, f"应说明 extype=simple 不解除：{suffix}"
@@ -131,7 +131,7 @@ def test_element_text_detail_message_wins_over_simple():
 def test_marker_attribute_form_still_preferred_and_advice_kept():
     reason = _html_error_reason(ATTR_PAGE)
     assert "11300002" in reason and "原始 SQL" in reason
-    suffix = _export_error_page_suffix(ATTR_PAGE.encode("utf-8"))
+    suffix = _export_error_page_suffix(ATTR_PAGE)
     assert "11300002" in suffix and "extype" in suffix, "11300002 的可执行建议不能丢"
 
 
@@ -172,7 +172,7 @@ def test_legal_csv_with_marker_is_not_rejected(tmp_path):
 # ---------------------------------------------------------------------------
 def test_blank_message_yields_no_reason_and_no_empty_tail():
     assert _html_error_reason(BLANK_MSG_PAGE) == ""
-    assert _export_error_page_suffix(BLANK_MSG_PAGE.encode("utf-8")) == ""
+    assert _export_error_page_suffix(BLANK_MSG_PAGE) == ""
 
 
 def test_blank_message_error_page_has_no_empty_tail(tmp_path):

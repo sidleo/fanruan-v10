@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.11
+version: 0.10.12
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 8 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -323,6 +323,10 @@ frcli schedule setting
 
 这个模板族**没有**「出错页面」字样 ⇒ 出错页判据是「**开头是 HTML 形态**（`_looks_like_html_head`）**且** 命中
 结构标记/特征串」，**不是**"64KB 窗口里出现过特征串"（后者会把合法 CSV 的备注列误判成坏产物，0.10.3 实测事故）。
+
+⚠️ 平台原因提取是**整页读**：出错页判据只用头部 64KB，但 `detail-message` 里可能嵌着整段原始 SQL，
+出错页实测 126KB（2026-10 真实会话，某复杂报表导出）——0.10.12 起对 HTML 出错页按需读全（上限 8MB）；
+更早版本只读 64KB，长 SQL 页面会丢失平台原因（只报「导出产物是平台出错页」）。
 
 撞上内存保护页时，`EXPORT_ERROR` 会带出平台原文**并附可执行建议**（`extype=simple` 不解除该保护）：
 

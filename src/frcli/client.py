@@ -133,9 +133,9 @@ _EXPORT_ERROR_CODE_ADVICE = {
 }
 
 
-def _export_error_page_suffix(head: bytes) -> str:
+def _export_error_page_suffix(text: str) -> str:
     """产物里带得出平台原因时拼成 `；平台原因: …`（读不出来返回空串）。"""
-    reason = _html_error_reason(head.decode("utf-8", "replace"))
+    reason = _html_error_reason(text)
     if not reason:
         return ""
     suffix = f"；平台原因: {reason}"
@@ -147,14 +147,30 @@ def _export_error_page_suffix(head: bytes) -> str:
     return suffix
 
 
-#: 产物头部读多少字节：出错页的 `detail-message` 在 4KB 级页面里，只看前 512B 会漏（实测）。
+#: 产物头部读多少字节：**只用于**判断形态与魔数（出错页/排队页/正常产物）。
 #: 有界读取，避免把几十 MB 的报表整体载入内存。
 _MAGIC_HEAD_BYTES = 65536
+
+#: 提取平台原因时出错页最多读多少字节。
+#: ⚠️ 不能复用 `_MAGIC_HEAD_BYTES`：`detail-message` 里可能嵌**整段原始 SQL**，页面实测可达
+#: 126KB（2026-10 真实会话：复杂报表导出撞 Impala 列名错误），64KB 内等不到 `</div>` ⇒
+#: 平台原因整条丢失，用户只能自己去解 `.bad`。出错页本身不会很大，8MB 上限足够兜底。
+_ERROR_PAGE_READ_BYTES = 8 * 1024 * 1024
 
 
 def _read_head(path: Path) -> bytes:
     with open(path, "rb") as f:
         return f.read(_MAGIC_HEAD_BYTES)
+
+
+def _read_error_page_text(path: Path) -> str:
+    """读出错页全文（有界 8MB）用于提取 `detail-message` 平台原因。"""
+    try:
+        with open(path, "rb") as f:
+            data = f.read(_ERROR_PAGE_READ_BYTES)
+    except OSError:
+        return ""
+    return data.decode("utf-8", "replace")
 
 
 #: 导出产物的魔数（用于把"200 + 出错页/排队页"挡在交付之前）。
@@ -209,24 +225,26 @@ def assert_export_magic(path, fr_format: str):
     head = _read_head(path)
     # 出错页证据 = **开头是 HTML 形态** 且 命中结构标记/特征串（见 _HTML_ERROR_PAGE_MARKERS）。
     # ⚠ 两道条件缺一不可：只认"窗口里出现过特征串"会误杀合法 CSV（0.10.3 实测事故）。
-    if _looks_like_html_head(head) and any(
-            m in head.lower() for m in _HTML_ERROR_PAGE_MARKERS):
+    html_form = _looks_like_html_head(head)
+    if html_form and any(m in head.lower() for m in _HTML_ERROR_PAGE_MARKERS):
         raise ExportError(f"导出产物是平台出错页，不是报表: {path}"
-                          f"{_export_error_page_suffix(head)}")
+                          f"{_export_error_page_suffix(_read_error_page_text(path))}")
     if fr_format in ("text", "csv"):
         # csv/text 里任何 HTML 文档都不是报表数据；`Dec-Waiting_In_Line` 是平台内部标识，
         # 保留兜底（真实排队页是 HTML，export_report 里还有一次全文判定）。
-        if _looks_like_html_head(head) or b"dec-waiting_in_line" in head.lower():
+        if html_form or b"dec-waiting_in_line" in head.lower():
+            page_text = _read_error_page_text(path) if html_form else head.decode("utf-8", "replace")
             raise ExportError(
                 f"导出产物是 HTML 页面（出错页/排队页），不是报表数据: {path}"
-                f"{_export_error_page_suffix(head)}")
+                f"{_export_error_page_suffix(page_text)}")
         return
     want = EXPORT_MAGIC.get(fr_format)
     if want and not head.startswith(want[0]) and want[0] not in head[:8]:
         raise ExportError(
             f"导出产物魔数不符（期望 {want[1]}）: {path}，头部={head[:24]!r}。"
             "常见原因：服务端返回出错页/排队页，或该格式的实际封装与预期不同"
-            + _export_error_page_suffix(head))
+            + _export_error_page_suffix(
+                _read_error_page_text(path) if html_form else head.decode("utf-8", "replace")))
 
 
 def _unwrap_json(resp: httpx.Response, what: str) -> Any:

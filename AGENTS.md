@@ -145,7 +145,9 @@ fanruan_v10/
 页面 `detail-message`（HTML 实体编码）里有具体错误代码与原始 SQL，解码即可定位坏数据集。
 0.10.3 起 `assert_export_magic` 的 `EXPORT_ERROR` **把平台原因一并带出**（与 `_unwrap_json` 共用
 `_html_error_reason()`），读到 `11300002` 还附 `--params '{"extype":"simple"}'` 的建议；
-读取长度为 64KB 有界读 —— 出错页的 `detail-message` 落在 4KB 级页面的后半段，只看前 512B 会漏。
+头部读取 64KB **只用于形态/魔数判定**；提取平台原因时对 HTML 出错页按需读全（上限 8MB）——
+`detail-message` 里可能嵌**整段原始 SQL**，出错页实测 126KB（2026-10 真实会话，某复杂报表导出）；
+旧实现只读 64KB 等不到 `</div>`，平台原因整条丢失（0.10.12 修）。
 
 出错页有**两种选择器写法**，都要认（0.10.7 起按 `(?:id|class)=` 匹配）：老语料是 `id="detail-message"`，
 2026-10 实测的**内存保护页**只有 `class="detail-message"` 且**没有**「出错页面」字样
@@ -425,6 +427,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 624 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 628 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |
