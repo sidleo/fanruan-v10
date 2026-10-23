@@ -121,6 +121,8 @@ frcli attach remove default1789441975426_Olw7l        # 用完清理
 
 ## 运行时巡检（模板性能分析）
 
+> 结果解读：`cell` 的耗时**包含等待数据集取数**（触发取数那格 ≈ `extra.db fetch`）；取数 vs 渲染怎么拆、性能排查顺序见 SKILL §6.22/§6.23。
+
 ```bash
 frcli inspect status                     # 插件状态：检测点是否生效（只读）
 # 真实执行一次模板，输出整体/环节/单元格耗时；等待由 CLI 内部完成（退避轮询），不用自己 sleep

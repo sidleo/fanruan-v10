@@ -852,6 +852,38 @@ frcli inspect status                                                          # 
 - 插件未安装/未启用时端点 404 或返回错误页；`inspect status` 的 `status` 码：
   `0` 正常 / `1` 部分检测点未生效 / `2` 关键点未生效 / `-1` 获取中 / `-2` 未知。
 
+**结果怎么读（2026-10 实测，最容易被误读）**：
+
+- `cell` 里某格的 `total` **包含「等待数据集返回」的墙钟时间**：触发取数的那一格，`total` ≈ `extra["db fetch"][数据集].cost`
+  （实测 116,294ms vs 116,291ms）。看到「某格很慢」先别改 cpt —— 先看 `db fetch`，否则会把取数等待当成渲染开销，做一轮无效优化。
+- `template-cost` = 总耗时；`Σ db fetch cost` = 取数；**差值才是渲染**。取数占大头就先优化 SQL（impala profile：`yh_bigdata olap sql history/profile`）。
+- **数据集缓存开着时取数 0ms**（`db fetch` 全 0），性能数字假快；测性能前必须先关数据集缓存（`share`/`StrategyConfig`，frcli 无开关，需改 cpt XML）。
+- `op=page` 没有 `db fetch`，要看取数耗时用 `--op view`。
+
+### 6.23 大报表性能排查：先分「取数 vs 渲染」，再谈 cpt 优化（别把取数等待当渲染）
+
+大报表优化最常见的白干一轮：**没确认耗时归属就去改 cpt 公式/条件属性/合并/扩展**。实测（10 万级单元格的树形报表）
+cpt 层改动（删公式、删过滤、去合并、去横向扩展）**全部无改善**，因为耗时是取数等待（`db fetch` 占 95%+）。
+
+排查顺序：
+
+1. **关数据集缓存再测**（否则取数 0ms 假快）。
+2. 单 sheet 跑 `inspect run --op view --raw`：看 `template-cost`、`extra.db fetch`、`cell` 最大格。
+   `cell 最大格 total ≈ db fetch cost` ⇒ 取数主导；差值才是渲染。
+3. 取数主导 → 查 SQL：`yh_bigdata olap sql history -e impala` 拿 query_id → `olap sql profile` 取 impala profile →
+   看扫描行数/字节、CPU、动态过滤到达时间、最大 cardinality；常见优化：把维度列内联进大 CTE 再聚合（避免亿行二次 join）、
+   核实条件聚合是否扫了不需要的日期区间、维表提取为共享 CTE（通常只有几个百分点）。
+4. **先查白算**：`dim_flag` 等维度档位是否全被使用（v7 93s 里 76% 白算在两个没用档位；砍档位 146s→22.7s，拆分不解决白算）。
+5. 渲染确实占大头，再做 cpt 对照实验（一次只改一项，缓存关闭，配对测 3 轮取中位数；集群抖动极大）。
+6. **拆分兜底**：按 sheet 拆成单 cpt，单次导出必须低于平台切断点（实测 ~443s，超时被掐断、exit 3）；拆分后仍受取数支配。
+7. 验收：导出 xlsx 逐格对比基准（行/列/值，浮点容差 1e-9）；性能数字用配对中位数，不用单次值。
+
+### 6.24 并发导出的三个坑：认证冲突 / 连接 reset / 504（批量导出要串行）
+
+两个 `frcli export` 进程并发跑：一个可能 `AUTH_FAILED … 302`（共用 `~/.frcli/tokens/<实例>.json`，并发登录/刷新互相覆盖），
+另一个可能 `CONNECTION_ERROR … Server disconnected`（偶发链路重置），大报表并发还可能撞平台网关 504。
+**处置：批量导出串行**；失败单条串行重试通常即成功；并发确需用时给每个进程独立配置/token 文件。
+不要靠调大 `FRCLI_TIMEOUT`（与认证无关）。504 的含义与提示见 §6.1。
 ### 6.19c0 会话巡检工具（`tools/scan_sessions.py`）
 
 扫 `~/.dsh/sessions` 里**与本技能相关**的会话（只认真的调用过 `frcli` 的），列出用户诉求（⚠ 标记抱怨/纠正）与 frcli 调用的报错片段，用于找优化点。
