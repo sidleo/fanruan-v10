@@ -33,6 +33,7 @@ frcli report list "demo_group/demo_user/dept_a/dept_b" -f table
 # 3. 看参数与取数口径
 frcli report paras "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt"   # 官方参数接口（含派生参数公式）
 frcli report datasets "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --sql -f table
+frcli report preview "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --dataset ds1 --params '{"edate":"20260228"}' --rows 20 -f table
 
 # 4. 导出（只传驱动参数；复杂报表务必调大超时）
 FRCLI_TIMEOUT=300 frcli export excel "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" \

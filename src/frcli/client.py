@@ -766,6 +766,48 @@ class FineReportClient:
             datasets.append({"name": name, "parameters": params, "sql": sql, "connection": conn})
         return datasets
 
+    def preview_report_dataset(self, report_path: str, dataset_name: str,
+                               params: dict = None, rows: int = 100) -> dict:
+        """预览报表里的一个 SQL 数据集（等价于 Designer 右键数据集「预览」）。
+
+        走远程设计 RPC `DataOperatorProvider.previewTableData`：服务端真实执行数据集查询，
+        只取列名/类型/前 N 行，**不写模板、不生成临时文件**。
+        数据集 SQL 里的 `${x}` 先按 `params` 做文本替换（与平台语义一致），缺参数直接报错。
+
+        只支持 SQL 数据集；服务器数据集/存储过程/内建数据集请在 Designer 或对应接口里看。
+        """
+        from . import dataset_preview
+        from .remotedesign import RemoteDesignSession
+
+        datasets = self.get_report_datasets(report_path)
+        target = None
+        for ds in datasets:
+            if ds.get("name") == dataset_name:
+                target = ds
+                break
+        if target is None:
+            names = "、".join(d.get("name", "") for d in datasets) or "（无数据集）"
+            raise ApiError(f"报表 {report_path} 里没有数据集 {dataset_name}；可选：{names}")
+        connection = (target.get("connection") or "").strip()
+        sql = (target.get("sql") or "").strip()
+        if not connection or not sql:
+            raise ApiError(
+                f"数据集 {dataset_name} 不是 SQL 数据集（连接名/SQL 为空），预览只支持 SQL 数据集")
+        sql = dataset_preview.substitute_params(sql, params or {})
+        with RemoteDesignSession(self.config) as session:
+            try:
+                result = dataset_preview.preview(session, connection, sql, rows=rows)
+            except ApiError as exc:
+                if "InvalidClassException" in str(exc):
+                    raise ApiError(
+                        "数据集预览的 Java 序列化骨架与当前平台版本不兼容（InvalidClassException）："
+                        "需要针对该平台版本重新生成 dataset_preview 里的 DBTableData 骨架；"
+                        "这不是 SQL/连接问题") from exc
+                raise
+        result.update({"report": report_path, "dataset": dataset_name,
+                       "connection": connection, "rows_requested": rows})
+        return result
+
     def get_report_paras(self, report_path: str) -> list[dict]:
         """获取报表参数定义（名称/类型/公式）。
 

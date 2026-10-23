@@ -442,6 +442,92 @@ def report_datasets(report_path, fmt, sql, instance):
         error(e)
 
 
+@report_group.command("preview")
+@click.argument("report_path")
+@click.option("--dataset", "dataset_name", required=True,
+              help="模板里的数据集名（见 report datasets）")
+@click.option("--params", help="数据集参数 JSON，如 '{\"edate\":\"2026-10-24\"}'")
+@click.option("--rows", type=click.IntRange(1, 1000), default=100, show_default=True,
+              help="最多预览行数")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+@click.option("-i", "--instance", help="FineReport 实例名")
+def report_preview(report_path, dataset_name, params, rows, fmt, instance):
+    """预览 SQL 数据集（服务端真实执行查询，只取前 N 行；不写模板、不生成临时文件）
+
+    等价于 Designer 里右键数据集 →「预览」。数据集 SQL 里的 `${x}` 按 --params 做文本替换，
+    与平台语义一致；参数没给全时直接报错，不会静默替换成空串。
+    """
+    try:
+        import json as _json
+
+        from ..exceptions import ApiError
+
+        parsed = {}
+        if params:
+            try:
+                parsed = _json.loads(params)
+            except ValueError as exc:
+                raise ApiError(f"--params 不是合法 JSON: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise ApiError("--params 必须是 JSON 对象，如 '{\"edate\":\"2026-10-24\"}'")
+
+        client = get_client(instance)
+        with client:
+            result = client.preview_report_dataset(
+                report_path, dataset_name, params=parsed, rows=rows)
+
+        if fmt == "json":
+            output_data(result, format="json")
+            return
+
+        # 一律用 rich.text.Text 包裹动态内容：数据/列名里可能含 `[red]`、`[/]` 等文本，
+        # 直接塞 str 会被 rich 当标记解析（丢字符，`[/]` 甚至抛 MarkupError 退出）。
+        from ..output import console
+        from rich.table import Table
+        from rich.text import Text
+
+        def _type_name(col):
+            return col["type"].rsplit(".", 1)[-1] if col["type"] else ""
+
+        columns = result["columns"]
+        console.print(Text(f"数据集预览: {dataset_name}（{report_path}）"))
+        rows_data = result["rows"]
+
+        if len(columns) > 12:
+            # 宽表不能横排：rich 在 80 列宽时会把 30+ 列压成 0 宽，表头和行值全部不可见
+            # （agent/非 TTY 环境默认就这么宽）。改成列清单 + 每行纵向键值对。
+            console.print(Text(f"列（{len(columns)} 个，宽表用纵向布局）:"))
+            for i, col in enumerate(columns, 1):
+                type_name = _type_name(col)
+                suffix = f"  ({type_name})" if type_name else ""
+                console.print(Text(f"  {i}. {col['name']}{suffix}"))
+            for r_idx, row in enumerate(rows_data, 1):
+                cells = [str(v) for v in row]
+                if len(cells) < len(columns):
+                    cells += [""] * (len(columns) - len(cells))
+                console.print(Text(f"行 {r_idx}:"))
+                for i, col in enumerate(columns, 1):
+                    console.print(Text(f"    {i}. {col['name']} = {cells[i - 1]}"))
+        else:
+            table = Table()
+            for col in columns:
+                type_name = _type_name(col)
+                header = Text(col["name"] + (f"\n{type_name}" if type_name else ""))
+                table.add_column(header)
+            for row in rows_data:
+                cells = [str(v) for v in row]
+                if len(cells) < len(columns):
+                    cells += [""] * (len(columns) - len(cells))
+                table.add_row(*[Text(c) for c in cells[:len(columns)]])
+            console.print(table)
+
+        console.print(Text(
+            f"连接: {result['connection']} · 返回 {len(rows_data)} 行（请求上限 {rows}）",
+            style="dim"))
+    except Exception as e:
+        error(e)
+
+
 # ===========================================================================
 # 模板创作：new / cell / dataset / param / style / table
 # ---------------------------------------------------------------------------

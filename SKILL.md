@@ -1,7 +1,7 @@
 ---
 name: fanruan-v10
-version: 0.10.16
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+version: 0.10.17
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
     bins: ["frcli"]
@@ -60,6 +60,8 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── info REPORT [-f]                     报表信息：数据集名清单 + 参数清单
 │   ├── paras REPORT [-f json|table]         报表参数定义（官方接口，含派生参数公式）
 │   ├── datasets REPORT [-f json|table] [--sql]   数据集名/参数/完整 SQL（--sql 不截断）
+│   ├── preview REPORT --dataset NAME [--params JSON] [--rows N] [-f json|table]
+│   │                                          预览 SQL 数据集（服务端真实执行、只取前 N 行，不写模板；见 §6.25）
 │   ├── download REPORT [-o LOCAL]           下载模板**原始字节**（走远程设计通道，与 upload 同源）
 │   ├── serverdatasets [-f]                  服务器数据集清单（平台级，实测 113 个）
 │   ├── columns DATASET [-f]                 服务器数据集的字段清单（列名/列类型）
@@ -188,7 +190,7 @@ demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
 
 | 等级 | 命令 | 说明 |
 |------|------|------|
-| 🟢 只读 | `server list/test`、`report list/info/paras/datasets/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
+| 🟢 只读 | `server list/test`、`report list/info/paras/datasets/preview/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
 | 🟡 计算 | `export *`、`export batch` | 数据只读，但服务端真实跑报表（复杂报表 50s+，批量可达数十分钟）；批量前说明规模 |
 | 🟠 本地写 | `server add/remove/set-default` | 只改实测环境 `~/.frcli/config.yaml` 与 token 缓存 |
 | 🧱 写范围（**默认拒绝**） | 环境变量 `FRCLI_WRITE_SCOPE=<目录>`，或命令行 `--any-path` | **没设范围又没 `--any-path` → 写命令直接拒绝**（沉默 ≠ 不限制）。设了范围则 `report upload/delete/edit/new/cell/dataset/param/style/table --apply`/`rpc` 写调用只允许落在该目录下，含 `..` 穿越、兄弟目录（`<scope>.tmp`、`<scope>x`）一律拦截 |
@@ -213,6 +215,8 @@ frcli report list "demo_group/demo_user/dept_a/dept_b" -f table
 frcli report info "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt"
 frcli report paras "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt"    # 官方参数接口：含派生参数公式
 frcli report datasets "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --sql -f table
+frcli report preview "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --dataset ds1 \
+    --params '{"edate":"20260228"}' --rows 20 -f table   # 等价 Designer 右键数据集「预览」（只读）
 
 # 3) 导出（只传驱动参数，其余由模板/全局参数自动派生；复杂报表务必调大超时）
 FRCLI_TIMEOUT=300 frcli export excel "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" \
@@ -949,6 +953,43 @@ cpt 层改动（删公式、删过滤、去合并、去横向扩展）**全部�
 - **`--at A3:B5` 只认已存在的格**：`report table` 只造**模板行**（A3/B3），展开出的 A4/B4 不存在 ⇒ CLI 会 warning「已跳过」。
   这是正常的：**规则挂在模板行上，展开行继承**，别为了"覆盖所有行"去写整片区域。
 
+### 6.25 数据集预览：走远程设计 RPC，不是 REST `/v10/dataset/preview`
+
+Designer 右键数据集「预览」的能力已封装成 `frcli report preview`：
+
+```bash
+frcli report preview "demo_group/demo_user/.../rpt.cpt" --dataset ds1 \
+    --params '{"edate":"20260228"}' --rows 20 -f table
+```
+
+**机制**（`src/frcli/dataset_preview.py`）：远程设计通道调
+`com.fr.data.operator.DataOperatorProvider.previewTableData(TableData, Map, int)`，服务端用
+`EmbeddedTableData.embedify` 真实执行数据集查询，返回列名/列类型/前 N 行。参数是 Java 对象，
+所以用一份**由平台自身 `ObjectOutputStream` 生成的 `DBTableData` 序列化骨架**，运行时只替换
+连接名/SQL 两个字符串（Java 序列化自描述，改长度前缀即可）；**不写模板、不落临时文件**。
+REST 的 `POST /v10/dataset/preview` 是**服务器数据集**的管理员接口，实测普通账号回
+`Fine-Dec_Default_Error_Tip`，不要拿它做模板数据集预览。
+
+**参数语义**：数据集 SQL 里的 `${x}` 是**文本替换**（与平台一致）。`--params` 没给全时 CLI
+**直接报错并列出缺的参数名** —— 服务端缺参数会静默替换成空串，跑出空结果/错 SQL 才报错，更难查。
+`report datasets` 只返回参数名不返回默认值，带参数据集必须显式传 `--params`。
+
+**限制**：
+- 只支持 SQL 数据集（有 `<DatabaseName>` + `<Query>`）；服务器数据集/存储过程/内建数据集请在
+  Designer 或 `report serverdatasets/columns` 看。
+- `-f table` 是给人看的：列数 >12 自动改用纵向布局（列清单 + 每行 `序号. 列名 = 值`）；`--rows` 很大时
+  输出会很长，拿数据请用 `-f json`（或减小 `--rows`）。
+- `--rows` 1–1000（默认 100），服务端只取前 N 行；预览会真实执行 SQL，复杂数据集可能几十秒到几分钟。
+  预览是**两跳**：先 `report datasets`（REST，吃 `FRCLI_TIMEOUT`，默认 30s，复杂模板会先在这里超时），
+  再远程设计 RPC（吃 `FRCLI_RD_TIMEOUT`，默认 300s）—— 两个都要按需调大。
+- 返回的单元格统一为字符串（类型在 `columns[].type` 里）；`null` 与空串都显示为空串。
+- 需要账号有远程设计权限（与 `report download/upload` 同一通道）；连接不存在报
+  `错误代码:31300013 找不到数据连接:<name>`，SQL 报错带 `11300001` + 平台原文。
+- 骨架是**平台 10.0.0 的 Java 序列化结构**（SUID/字段固定）。若平台大版本升级后预览报
+  `InvalidClassException`，说明服务端类结构变了：需要重新生成骨架（`dataset_preview._TABLE_DATA_SKELETON`），
+  不是 SQL/连接问题。
+- `--params` 的 `null` 按空串替换；布尔等非字符串值用 Python `str()`（`True`/`False`），SQL 里要 `'true'` 请直接传字符串。
+
 ## 7. 故障排查
 
 | 现象 | 处理 |
@@ -979,6 +1020,7 @@ cpt 层改动（删公式、删过滤、去合并、去横向扩展）**全部�
 | `schedule create` 报 `detached entity passed to persist: ScheduleOutputEntity` | YAML 沿用了源任务的 `scheduleOutput.id`/输出 action id，换成新 UUID（§6.11） |
 | 任务跑完日志缺「自定义类附件处理」 | 那一步是异步的，约 5 分钟后才写日志，别据此判定配置没生效（§6.12） |
 | `schedule history -n 1` 拿到的不是最新一次 | 返回按时间**升序**，`-n 1` 是最早那条；放大 `-n` 取最后一条，或改用 `schedule record`（§6.6） |
+| `report preview` 报「数据集 SQL 缺少参数」/「找不到数据连接」/`11300001`/`InvalidClassException` | 分别是：`--params` 没给全（CLI 会列出缺的名字）、连接名失效、SQL 报错（带平台原文）、预览骨架与平台版本不兼容（§6.25） |
 | `report paras` 返回 `[]` | 该报表没有参数 **或路径不存在**（平台对不存在的路径也返回空）；先用 `report list <目录>` 核对路径 |
 | `API_ERROR: Required String parameter ...` / `请求方法不支持` / `无此接口权限` | 直接调底层接口时的平台原文，按提示补参数/换方法/换账号（§6.9） |
 | `API_ERROR: 平台返回错误页（无详细信息）` | 多为对象不存在：`schedule log` 的 logId 必须来自 `schedule history <任务名>`（`<任务名>_same_fire_<时间戳>`），record/records 的 uuid/id 不能用；过期则用 history 重新取（§6.6） |

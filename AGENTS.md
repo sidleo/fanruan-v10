@@ -88,7 +88,7 @@ fanruan_v10/
 | 远程设计 RPC（写模板） | `/decision/remote/design/channel` | POST，body = gzip + Java 序列化的 Invocation |
 | 远程设计服务清单 | `/decision/remote/design/service` | POST 表单 `username`+`password` |
 
-不可用：`dataset preview`（需管理员权限）；
+不可用：REST `POST /v10/dataset/preview`（服务器数据集接口，需管理员；模板数据集预览走远程设计 RPC，见下文坑点）；
 `POST /v10/schedule/task/log/search`（服务端 ClassCastException，该版本坏）。
 登录/配置类 `/decision/login/*` **不带 `v10` 前缀**。
 
@@ -110,7 +110,7 @@ fanruan_v10/
 
 ## 行为约束
 
-- **测试只用只读命令**：`server list/test`、`report list/info/paras/datasets/download/serverdatasets/columns/authed`、
+- **测试只用只读命令**：`server list/test`、`report list/info/paras/datasets/preview/download/serverdatasets/columns/authed`、
   `schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *`。
   导出会真实触发服务端计算，批量导出 / `schedule run|delete` 必须先向用户确认。
   `attach upload` 属**服务端写**（落附件缓存），只在用户明确授权的对象上测，测完必须 `attach remove` 清理。
@@ -202,6 +202,17 @@ fanruan_v10/
 现在 `results` 与 `errors` 都带本次 `params` 与已展开的 `output`，`total` 是**展开后**的任务数，manifest 条数另给 `manifest_reports`。
 两个边界：`params` 给**空列表** ⇒ `EXPORT_ERROR` 明确点名是哪个参数（旧版静默丢报表：`total: 0` + exit 0，看着像跑完了）；
 多条任务展开出**同一个 output 路径** ⇒ 顶层 `warnings` 数组提示会互相覆盖（多半是 `output` 漏了 `{参数名}` 占位）。
+
+### 数据集预览走远程设计 RPC，不要用 REST `/v10/dataset/preview`
+
+REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员（普通账号 200 + `Fine-Dec_Default_Error_Tip`），
+不是 Designer 那种模板数据集预览。模板数据集预览 = 远程设计通道的
+`DataOperatorProvider.previewTableData(TableData, Map, int)`；参数是 Java 对象，`jser.encode_param` 只支持标量，
+所以用「平台自身序列化出的 `DBTableData` 骨架 + 运行时替换连接名/SQL」构造（`src/frcli/dataset_preview.py`）。
+结果 `EmbeddedTableData` 走 XML 序列化器（不是 JDK 序列化），`<RowData>` 是
+`ASCII85(raw deflate(行文本))` 且 XML 里 `]` 被转义成 `]A`；解码要镜像平台实现细节：
+自动每 72 字符折行、`z` 表示 4 个零字节、末组把终止符 `~` 留在组内参与运算（按标准 ASCII85 补 `u` 对平台产物不产生差异，但实现仍与平台解码器对齐）。
+写 cpt 里的 `${x}` 预览时由 CLI 先做文本替换，缺参数直接报错（平台在服务端会静默替换成空串）。
 
 ### 运行时巡检（`frcli inspect`）：必须「触发计算」+ 内部轮询，别让 agent 猜时间
 
@@ -456,6 +467,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 677 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 700 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

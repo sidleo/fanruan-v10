@@ -43,7 +43,7 @@
 | `com.fr.cluster.engine.rpc.remote.ClusterOperator` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 1 | 1 | `isCluster()`：是否集群部署。 |
 | `com.fr.config.dao.CommitHelper` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 1 | 0 | 提交平台配置变更 —— **永远 deny**（本工具绝不写平台配置）。 |
 | `com.fr.config.dao.DataFetcher` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 1 | 0 | 按实体类读平台配置（`getConfig(Class,String)`）。参数是 `Class` 对象，当前编码器不支持 → 实际不可调。 |
-| `com.fr.data.operator.DataOperatorProvider` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 18 | 3 | 数据集/数据连接侧能力：建连测试、表结构·字段·存储过程元数据、数据集预览。可调 `getColumns(连接名, schema, 表名)`、`getProcedureText`、`getStoreProcedureDeclarationParameters`（纯字符串）；其余都需要 `Connection`/`TableData` 对象参数 → 当前不可调。 |
+| `com.fr.data.operator.DataOperatorProvider` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 18 | 3 | 数据集/数据连接侧能力：建连测试、表结构·字段·存储过程元数据、数据集预览。可调 `getColumns(连接名, schema, 表名)`、`getProcedureText`、`getStoreProcedureDeclarationParameters`（纯字符串）；需要 `Connection`/`TableData` 对象参数的其余方法：`TableData` 可用平台序列化骨架构造（见 `dataset_preview.py` / `frcli report preview`），`Connection` 对象参数仍不可调。 |
 | `com.fr.esd.core.remote.ESDConfigEventOperator` | `plugins/plugin-com.fr.plugin.esd-1.8.4/fr-plugin-esd-1.8.4.jar` | interface | 2 | 0 | 触发决策平台事件总线 —— **永远 deny**。 |
 | `com.fr.file.filetree.FileNodes` | `WEB-INF/lib/fine-core-10.0.jar` | interface | 11 | 4 | 模板文件树（结构化 `FileNode[]`，含类型信息，比 `WorkResource.list` 丰富）。可调 `getSupportedTypes()` / `list(String)` / `list(String, boolean)` / `listWebRootFile(String)`；其余重载要 `FileExtension` 对象。 |
 | `com.fr.form.share.ShareComponentOperator` | `WEB-INF/lib/fine-report-engine-10.0.jar` | interface | 4 | 1 | 共享组件库（复用组件）：`getSharePath` 只读；安装/删除组件 deny。 |
@@ -171,7 +171,9 @@
 ### `com.fr.data.operator.DataOperatorProvider`
 
 - **jar**：`webapps/webroot/WEB-INF/lib/fine-core-10.0.jar`　**类型**：interface　**方法**：18
-- **用途**：数据集/数据连接侧能力：建连测试、表结构·字段·存储过程元数据、数据集预览。可调 `getColumns(连接名, schema, 表名)`、`getProcedureText`、`getStoreProcedureDeclarationParameters`（纯字符串）；其余都需要 `Connection`/`TableData` 对象参数 → 当前不可调。
+- **用途**：数据集/数据连接侧能力：建连测试、表结构·字段·存储过程元数据、数据集预览。纯字符串参数的 `getColumns(连接名, schema, 表名)`、`getProcedureText`、`getStoreProcedureDeclarationParameters` 可直接调；
+  需要 `Connection`/`TableData` 对象参数的其余方法**也不是完全不可调**：`TableData` 可用「平台自身序列化出的 `DBTableData` 骨架 + 运行时替换连接名/SQL」构造（`src/frcli/dataset_preview.py`，`frcli report preview` 即 `previewTableData(TableData, Map, int)`）；
+  需要 `Connection` 对象的仍不可调。
 
 | 策略 | 签名 |
 |---|---|

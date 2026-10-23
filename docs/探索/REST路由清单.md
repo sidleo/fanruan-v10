@@ -494,7 +494,7 @@
 | `/v10/dataset/file/verification` | GET | ✅ |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#verification` |
 | `/v10/dataset/files` | GET | ✅ |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#getFileList` |
 | `/v10/dataset/param` | POST |  |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#refreshParameters` |
-| `/v10/dataset/preview` | POST |  |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#preview` |
+| `/v10/dataset/preview` | POST |  |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#preview`（⚠️ 服务器数据集接口，需管理员：普通账号 200 + `Fine-Dec_Default_Error_Tip`；**模板数据集预览**改用远程设计 RPC `DataOperatorProvider.previewTableData`，见 `frcli report preview`） |
 | `/v10/dataset/preview/exist` | POST |  |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#previewExsitDataSet` |
 | `/v10/dataset/upload` | POST |  |  | `com.fr.web.controller.decision.api.dataset.DataSetResource#upload` |
 | `/v10/dataset/users` | POST |  |  | `com.fr.web.controller.decision.api.user.UserResource#importUser` |

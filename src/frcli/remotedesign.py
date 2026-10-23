@@ -54,7 +54,16 @@ def build_call(class_name, method_name, args, metadata) -> bytes:
     """args: [(type, value)]；type 支持 jser 里的标量类型（String / byte[] / int …）。"""
     param_types = [jser.normalize_param_type(t) for t, _ in args]
     blobs = [jser.encode_param(t, v) for t, v in args]
+    descs = [jser.PARAM_TYPE_DESC[t] for t in param_types]
+    return build_call_raw(class_name, method_name, list(zip(param_types, descs, blobs)), metadata)
 
+
+def build_call_raw(class_name, method_name, params, metadata) -> bytes:
+    """params: [(类型名, ClassDesc, 已编码字节流)]。
+
+    用于参数不是标量、而是**自定义 Java 对象**的调用（如数据集预览要传 `TableData`）。
+    每个 blob 必须是 `SerializerSummary` 认的格式：Java 序列化头 + "JDK" mark + 值。
+    """
     w = jser.JavaWriter()
     w.raw(jser.STREAM_MAGIC + jser.STREAM_VERSION)
 
@@ -62,10 +71,10 @@ def build_call(class_name, method_name, args, metadata) -> bytes:
         w.string(class_name)
         w.string(method_name)
         w.array(jser.DESC_CLASS_ARR,
-                [(lambda n=n: w.cls(n, jser.PARAM_TYPE_DESC[n])) for n in param_types])
+                [(lambda n=n, d=d: w.cls(n, d)) for n, d, _b in params])
         w.array(jser.DESC_BYTE_ARR_ARR,
                 [(lambda b=b: w.primitive_array(jser.DESC_BYTE_ARR, b, len(b)))
-                 for b in blobs])
+                 for _n, _d, b in params])
 
     w.object(jser.DESC_INVOCATION_PACK, body)
 
@@ -268,6 +277,38 @@ class RemoteDesignSession:
         if res.exception:
             raise ApiError(f"远程设计 RPC {method} 失败: {res.exception}")
         return _unwrap_value(res.value)
+
+    def call_serialized_payload(self, service: str, method: str, params) -> tuple:
+        """调用并返回 (mark, payload_bytes)。
+
+        有的返回值不是 JDK 序列化，而是服务端注册的别的 Serializer（例如
+        `EmbeddedTableData` 走 XML 序列化器）：这时 payload 是原始文本，不能按 Java 流解析。
+        """
+        token = self.login()
+        meta = {"username": self.config.username, "id": self.client_id,
+                "token": token, "encryptVersion": "encryptVersion"}
+        resp = self._post(f"{self.base}/channel",
+                          content=build_call_raw(service, method, params, meta),
+                          headers={"Content-Type": "application/octet-stream"})
+        if resp.status_code != 200:
+            raise ConnectionError(f"远程设计 channel 失败: HTTP {resp.status_code}")
+        r = jser.JavaReader(gzip.decompress(resp.content))
+        r.raw(4)
+        marker = r.read_object()
+        if not isinstance(marker, JObject):
+            raise ApiError(f"远程设计返回了非预期对象: {marker!r}")
+        exc = marker.fields.get("exception")
+        if isinstance(exc, JObject):
+            raise ApiError(f"远程设计 RPC {method} 失败: {_throwable_message(exc)}")
+        raw = marker.fields.get("objectBytes")
+        if isinstance(raw, jser.JArray):
+            raw = bytes(v & 0xFF for v in raw)
+        if not raw:
+            return None, b""
+        r2 = jser.JavaReader(bytes(raw))
+        r2.raw(4)
+        mark = r2.read_object()
+        return mark, bytes(raw)[r2.p:]
 
     # -- 文件操作（WorkResource）-------------------------------------------
     def list(self, path: str = ""):
