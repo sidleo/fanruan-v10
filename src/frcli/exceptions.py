@@ -12,6 +12,11 @@ class AuthError(FrcliError):
     code = "AUTH_FAILED"
 
 
+class AuthLockTimeoutError(AuthError):
+    """等待实例登录锁超时（不是认证失败：另一个 frcli 进程正在登录同一实例）"""
+    code = "AUTH_LOCK_TIMEOUT"
+
+
 class ConfigError(FrcliError):
     """配置错误"""
     code = "CONFIG_ERROR"

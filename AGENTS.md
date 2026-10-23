@@ -221,11 +221,12 @@ fanruan_v10/
 另：`dim_flag` 等维度档位先查有没有白算（v7 93s 里 76% 白算在两个没用档位，砍档位 146s→22.7s）；单次导出切断点实测 ~443s。
 完整流程：SKILL §6.23 / KB `永辉/帆软/fine_report/cpt技巧/帆软大报表性能排查先分取数与渲染`。
 
-### 并发导出：认证冲突 / 连接 reset / 504，批量导出要串行
+### 并发导出：0.10.16 起登录跨进程串行；余下是链路 reset / 网关 504
 
-两个 `frcli export` 并发跑会共用 token 缓存（`~/.frcli/tokens/<实例>.json`）互相覆盖 → 一个报 `AUTH_FAILED … 302`，
-另一个可能被连接重置；大报表并发还可能撞网关 504。**批量导出串行**，失败单条串行重试即成功；调大 `FRCLI_TIMEOUT` 对认证无效。
-（2026-10 真实会话：并发导出 v7/v9 两条全失败，串行后全部成功。）
+同一实例多进程共用 token 缓存（`~/.frcli/tokens/<实例>.json`），旧版并发登录会互相覆盖 → 一个报 `AUTH_FAILED … 302`
+（2026-10 真实会话：并发导出 v7/v9 两条全失败，串行后全部成功）。**0.10.16 起**登录/刷新走实例级文件锁
+（`<token>.lock`，`FRCLI_AUTH_LOCK_TIMEOUT` 默认 30s）并在锁内二次检查缓存；token 缓存原子写 —— 并发不再撞认证。
+仍建议批量导出串行（降低平台/网关压力）；剩余偶发 `Server disconnected`/504 按链路问题重试，调 `FRCLI_TIMEOUT` 对认证无效。
 
 ### 出错页 `detail-message` 是通用诊断/挖接口入口（**不限导出**）
 
@@ -455,6 +456,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 661 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 677 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

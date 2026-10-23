@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.10.15（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示；0.10.15 起：`schedule log` 传错 logId 来源给出来源提示）
+- **版本**：0.10.16（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示；0.10.15 起：`schedule log` 传错 logId 来源给出来源提示；0.10.16 起：并发导出登录跨进程串行（实例级文件锁））
 
 ## 安装 / 自举
 
@@ -175,7 +175,7 @@ CLI 输出为 JSON（`-f table` 为表格），便于 agent 解析：
 
 - 配置搜索顺序：`$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml`
 - token 缓存：`~/.frcli/tokens/<实例>.json`（默认 24h；认证失效——401/403 **或 302→CAS 登录页**——自动清缓存重登一次）
-- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_INSPECT_TIMEOUT`（秒，默认 60；`inspect run` 等待巡检结果上限，模板计算本身仍受 `FRCLI_TIMEOUT` 约束）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
+- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_INSPECT_TIMEOUT`（秒，默认 60；`inspect run` 等待巡检结果上限，模板计算本身仍受 `FRCLI_TIMEOUT` 约束）、`FRCLI_AUTH_LOCK_TIMEOUT`（秒，默认 30；并发进程等待同一实例登录锁的上限）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
 
 ```yaml
 default: yh

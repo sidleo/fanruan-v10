@@ -396,21 +396,30 @@ class FineReportClient:
         self.relogged = False  # 本次会话是否因认证失效而重登过
         self.net_retries = 0   # 本次会话因连接层错误自动重发的次数（幂等 GET 才有）
 
+    def _apply_token(self, token: str):
+        """把 token 与对应 cookies 一起灌进 http client。
+
+        ⚠️ 只要 token 不带 cookies，本平台会回 302（而且这次 302 会把 token 一起吊销），
+        所以两个必须成对设置 —— 采纳别的进程刷好的 token 时同样要带上它的 cookies。
+        """
+        self._http.headers["Authorization"] = f"Bearer {token}"
+        for name, value in self.token_mgr.get_cookies().items():
+            self._http.cookies.set(name, value)
+
     def _ensure_auth(self):
-        """确保已认证，必要时自动登录"""
+        """确保已认证，必要时自动登录。
+
+        登录/刷新走 `TokenManager.refresh_token()`：同一实例的**多个 frcli 进程**会排队拿
+        一把实例级文件锁，只有第一个真正登录，其余复用同一份 token —— 并发批量导出时
+        之前会各自登录、互相覆盖缓存，其中一个必然撞 CAS 302（AUTH_FAILED）。
+        """
         if self._authenticated:
             return
 
-        token = self.token_mgr.get_valid_token()
-        if token:
-            self._http.headers["Authorization"] = f"Bearer {token}"
-            for name, value in self.token_mgr.get_cookies().items():
-                self._http.cookies.set(name, value)
-            self._authenticated = True
-        else:
-            token = self.token_mgr.login(self._http)
-            self._http.headers["Authorization"] = f"Bearer {token}"
-            self._authenticated = True
+        # refresh_token = 缓存有效直接复用；失效则在锁内二次检查，仍无效才登录
+        token = self.token_mgr.refresh_token(self._http)
+        self._apply_token(token)
+        self._authenticated = True
 
     def _send(self, method: str, path: str, **kwargs) -> httpx.Response:
         """发一次请求；连接层错误时按策略重发。
@@ -444,11 +453,15 @@ class FineReportClient:
 
         if _is_auth_failure(resp):
             self._authenticated = False
-            self.token_mgr.invalidate()
+            stale_token = self.token_mgr.get_valid_token()  # 记下失效的是哪个 token
             self._http.cookies.clear()  # 丢掉服务端已失效的会话 cookie
-            token = self.token_mgr.login(self._http)
-            self._http.headers["Authorization"] = f"Bearer {token}"
+            # 锁内先看有没有别的进程刚刷好的新 token；没有才重登（避免并发连环重登、
+            # 互相作废——这是并发导出报 AUTH_FAILED 的根因）。
+            token = self.token_mgr.reauthenticate(self._http, invalid_token=stale_token)
+            self._apply_token(token)  # 采纳别的进程的新 token 时，必须连它的 cookies 一起带上
             self._authenticated = True
+            # 含「采纳别的进程刚刷好的 token、未真正 login」的情况：对外含义是
+            # 「因认证失效重新认证过」，不是「一定重新登录过」。
             self.relogged = True
             resp = self._send(method, path, **kwargs)
             if _is_auth_failure(resp):

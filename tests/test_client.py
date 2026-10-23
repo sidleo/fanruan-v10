@@ -1,5 +1,7 @@
 """客户端模块测试"""
 
+from pathlib import Path
+
 import httpx
 import pytest
 from frcli.models import ServerConfig
@@ -31,12 +33,19 @@ def test_client_context_manager():
 
 
 def _mock_client(handler) -> FineReportClient:
-    """构造一个用 MockTransport 的客户端，避免真实网络与落盘缓存"""
+    """构造一个用 MockTransport 的客户端，避免真实网络与落盘缓存。
+
+    token 缓存必须落到临时目录：否则 `_load_cached_token` 会读真实 HOME 的
+    `~/.frcli/tokens/test.json`，测试结果受本机残留缓存影响（也无法在干净环境复现）。
+    """
+    import tempfile
+
     config = ServerConfig(
         name="test",
         url="http://localhost:8705",
         username="admin",
         password="pwd",
+        token_file=Path(tempfile.mkdtemp(prefix="frcli-test-")) / "test.json",
     )
     client = FineReportClient(config)
     client._http.close()
