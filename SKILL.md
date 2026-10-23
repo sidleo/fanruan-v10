@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.14
+version: 0.10.15
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -171,6 +171,8 @@ frcli [--version] [-i INSTANCE] [-v]
     ├── record TASK_NAME [--page P] [-n N]   某任务的执行记录+结果（含 detailMessage/runType）
     ├── records [--page P] [-n N]            全平台执行记录（total 十万级）
     ├── log TASK_LOG_ID [-f]                 单条日志详情节点树（哪一步失败、错误内容）
+    │                                        ⚠️ TASK_LOG_ID 必须是 history 返回的 id（<任务名>_same_fire_<时间戳>），
+    │                                           record/records 的 uuid/id 是执行记录 id，传错报「对象不存在」
     └── setting                              调度全局设置（消息开关/日志清理）
 ```
 
@@ -405,6 +407,10 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
   「我有哪些报表」。要看有权限的模板树用 `report list`（平台已按权限过滤；实测 2026-10 约 3.9k 条）。
   结果为空时 0.10.6 起会在 **stderr** 打一行提示（stdout 仍是合法 JSON，管道解析不受影响）。
 - `schedule history [任务名]` 是 **taskName 精确匹配**：任务近几天没有日志就静默返回 `[]`，不代表 CLI 坏了（不传名字才看全局日志）。
+- ⚠️ **`schedule log` 的参数是 `schedule history` 返回的 `id`**（形如 `<任务名>_same_fire_<时间戳>`）。
+  `schedule record` / `schedule records` 里的 `uuid` / `id` 是**执行记录 id**，传进 `log` 平台会报「对象不存在」
+  （detail-message 为空，只剩 `Fine-Dec_Default_Error_Tip`）。要定位某次失败：先 `schedule record <任务名>` 看
+  `detailMessage`/最近记录，再 `schedule history <任务名>` 取最新 `id` 去 `log`；0.10.15 起传错会直接给这个提示。
 - ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`（倒序，最新在前）。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。
 
@@ -931,7 +937,7 @@ frcli inspect status                                                          # 
 | `schedule history -n 1` 拿到的不是最新一次 | 返回按时间**升序**，`-n 1` 是最早那条；放大 `-n` 取最后一条，或改用 `schedule record`（§6.6） |
 | `report paras` 返回 `[]` | 该报表没有参数 **或路径不存在**（平台对不存在的路径也返回空）；先用 `report list <目录>` 核对路径 |
 | `API_ERROR: Required String parameter ...` / `请求方法不支持` / `无此接口权限` | 直接调底层接口时的平台原文，按提示补参数/换方法/换账号（§6.9） |
-| `API_ERROR: 平台返回错误页（无详细信息）` | 多为对象不存在：`schedule log` 的 logId 已过期或被清理，用 `schedule history` 重新取（§6.9） |
+| `API_ERROR: 平台返回错误页（无详细信息）` | 多为对象不存在：`schedule log` 的 logId 必须来自 `schedule history <任务名>`（`<任务名>_same_fire_<时间戳>`），record/records 的 uuid/id 不能用；过期则用 history 重新取（§6.6） |
 | `AUTH_FAILED: 重新登录后仍被重定向到登录页` | 密码错、账号被锁或无权限；检查 `~/.frcli/config.yaml` 里的密码与网络 |
 | 请求被重定向到 CAS / 返回登录页 HTML | token 失效：CLI 自动重登一次；仍失败检查密码或网络（§6.4） |
 | 对比 .cpt 整体 hash 发现「模板被改了」 | `format=cpt` 响应字节不稳定（内嵌容器 identity hash），改用结构化比对（§6.10） |

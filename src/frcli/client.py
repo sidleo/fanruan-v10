@@ -873,11 +873,25 @@ class FineReportClient:
         }
 
     def get_schedule_log_detail(self, task_log_id: str) -> dict:
-        """获取单条调度日志的详情（节点树，逐节点状态与错误，用于定位失败原因）"""
+        """获取单条调度日志的详情（节点树，逐节点状态与错误，用于定位失败原因）
+
+        ⚠️ `task_log_id` 必须是 `schedule history <任务名>` 返回的 `id`
+        （形如 `<任务名>_same_fire_<时间戳>`）；`schedule record` / `schedule records`
+        里的 `uuid` / `id` 是**执行记录 id**，直接传进来平台会报「对象不存在」。
+        """
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/task/log/details"
         resp = self._get(url, params={"taskLogId": task_log_id})
-        return _unwrap_json(resp, "读取调度日志详情").get("data") or {}
+        try:
+            return _unwrap_json(resp, "读取调度日志详情").get("data") or {}
+        except ApiError as e:
+            if "对象不存在" in str(e):
+                raise ApiError(
+                    f"{e}。logId 必须来自 `frcli schedule history <任务名>` 返回的 `id`"
+                    "（形如 `<任务名>_same_fire_<时间戳>`）；`schedule record` / `schedule records` 里的"
+                    " uuid/id 是执行记录 id，不能用于日志详情——请先用任务名查 history 取最新 id 再 log"
+                ) from e
+            raise
 
     # ========== 系统 / 平台信息（只读） ==========
 

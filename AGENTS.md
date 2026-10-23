@@ -264,6 +264,8 @@ fanruan_v10/
 ### schedule 的参数语义
 
 `get/run/update` 收任务**名**，`delete` 收 UUID **id**（先 `schedule get` 拿）；`get` 内部是模糊搜索取第一条。
+`schedule log` 收的是 `schedule history` 返回的 `id`（`<任务名>_same_fire_<时间戳>`）；`record`/`records` 的 `uuid`/`id`
+是**执行记录 id**，传进 `log` 平台报「对象不存在」（3 个真实会话踩过，0.10.15 起错误信息带来源提示）。
 
 ### `report datasets` 读不到定义 = 该报表数据集本身报错
 
@@ -439,6 +441,6 @@ fanruan_v10/
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 659 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 661 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

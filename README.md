@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.10.14（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示）
+- **版本**：0.10.15（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示；0.10.15 起：`schedule log` 传错 logId 来源给出来源提示）
 
 ## 安装 / 自举
 
@@ -56,6 +56,7 @@ frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID
 frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id 即 logId
 frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录 + 结果（分页，带 total）
 frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树，定位哪一步失败
+#   ⚠️ log 的参数是 history 返回的 id（<任务名>_same_fire_<ts>）；record/records 的 uuid/id 是执行记录 id，不能用
 
 # 7.1 定时任务（写，🔴 先确认）：create / update / delete <UUID> / run <任务名>
 #   新建任务：用 schedule get 派生 YAML（去掉只读字段 + 换 taskName/baseName + 重置 scheduleOutput.id
