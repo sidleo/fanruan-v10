@@ -399,6 +399,9 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 
 - `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿），且请求体是**裸数组** `["<id>"]`。传错会报 `任务不存在` 或删不动。
 - `schedule get` 内部是**模糊搜索取第一条**，任务名需与 `schedule list` 完全一致，避免误命中。
+- 报告类命令的模板路径是**位置参数**：`report info <路径>`（不要写 `--path`）；`report datasets` **没有 `--name` 过滤**
+  （输出全部数据集，要单看某个就 `--sql` 后本地筛/直接读 JSON 的 `name` 字段）；`schedule` **没有 `runs` 子命令**
+  ——查执行记录用 `schedule record`/`records`（2026-10 三个真实会话各踩一次，属参数猜错，命令签名见本文件命令树）。
 - `report list <目录>` 结果里会**包含该目录自身**一条（`is_directory: true`），属正常实现，过滤掉即可。
 - `report list /` 会返回**整个服务器**的文件树（数千条，随平台增长；实测 2026-10 约 3.9k），不要用 `/` 当"顶层"。
 - ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
