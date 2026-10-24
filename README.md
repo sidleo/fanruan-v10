@@ -56,6 +56,10 @@ frcli schedule list -f table
 frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID id
 frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id 即 logId
 frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录 + 结果（分页，带 total）
+frcli schedule record "demo_task_超时明细" --all -n 20             # 执行记录（翻全量，按 time 倒序）
+frcli schedule pause  "demo_任务名"                                # 暂停任务（只切状态，不删任务）
+frcli schedule update "demo_任务名" --template "demo_group/…/新模板.cpt"   # 改任务模板（精确名；校验路径存在；保留暂停态）
+frcli schedule resume "demo_任务名"                                # 恢复任务运行
 frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树，定位哪一步失败
 #   ⚠️ log 的参数是 history 返回的 id（<任务名>_same_fire_<ts>）；record/records 的 uuid/id 是执行记录 id，不能用
 

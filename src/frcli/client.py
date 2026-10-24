@@ -695,6 +695,20 @@ class FineReportClient:
                         result.append({"name": name, "path": path, "is_directory": is_parent, "type": "directory" if is_parent else "report"})
         return result
 
+    def report_exists(self, report_path: str) -> bool:
+        """按路径判断模板是否存在（用 `templates/all` 的 keyword 服务端筛选，不解析模板）。"""
+        self._ensure_auth()
+        path = (report_path or "").strip("/")
+        if not path:
+            return False
+        parent, _, name = path.rpartition("/")
+        items = self.list_reports("/" + parent if parent else "/", keyword=name, file_types="cpt")
+        # templates/all 里目录条目也带 path；目录不是可调度模板（实测目录路径能通过平台 PUT，
+        # 会把任务静默指向目录），必须按 is_directory 排除。
+        return any(
+            not it.get("is_directory") and (it.get("path") or "").strip("/") == path
+            for it in items)
+
     def get_report_info(self, report_path: str) -> dict:
         """获取报表文件信息"""
         self._ensure_auth()
@@ -864,7 +878,13 @@ class FineReportClient:
         return [{"name": name} for name in names]
 
     def get_schedule(self, task_name: str) -> dict:
-        """获取定时任务详情"""
+        """获取定时任务详情。
+
+        参数默认是**任务名**（平台 `task/search` 是**子串模糊**搜索，取第一条；写命令必须自己
+        校验返回的 taskName 与输入完全一致，见 commands/schedule.py）；也接受 UUID 形式的
+        taskId（用 `task/listAll/2` 反查任务名，实测该列表只含**当前账号创建**的任务，
+        非本人任务按名可查、按 id 反查会失败；`task/search` 传 id 只会静默返回空）。
+        """
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/task/search"
         resp = self._post(url, json={"taskName": task_name})
@@ -873,6 +893,14 @@ class FineReportClient:
             items = data.get("data", {}).get("items", [])
             if items:
                 return items[0]
+        key = (task_name or "").strip()
+        if re.fullmatch(
+                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", key):
+            key_low = key.lower()
+            for item in self.list_schedule_tasks(all_tasks=True).get("items", []):
+                ids = {str(item.get("taskId") or "").lower(), str(item.get("id") or "").lower()}
+                if key_low in ids and item.get("taskName"):
+                    return self.get_schedule(item["taskName"])
         return {}
 
     def create_schedule(self, config: dict) -> str:
@@ -891,10 +919,52 @@ class FineReportClient:
         # 确保包含 id 字段，并移除只读字段
         update_data = config.copy()
         update_data["id"] = task_id
-        for field in ["nextFireTime", "preFireTime", "creator", "editable", "taskState", "originTaskId"]:
+        # creator **必须随 PUT 回传**：实测把它剔除后平台会把 creator 落库为空
+        # （2026-09 踩过；2026-10-24 真机对照：带 creator 时保持不变，剔除后清空）。
+        for field in ["nextFireTime", "preFireTime", "editable", "taskState", "originTaskId"]:
             update_data.pop(field, None)
         resp = self._http.request("PUT", url, json=update_data, headers={"Authorization": f"Bearer {self.token_mgr.get_valid_token()}", "Content-Type": "application/json"})
-        return resp.status_code == 200
+        # 平台对字段错误也是 200 + HTML 出错页（实测：带 taskState 对象会 200 + detail-message）；
+        # 只看状态码会把失败报成成功，这里必须走 _unwrap_json 并校验 data == "success"。
+        return str((_unwrap_json(resp, "更新定时任务") or {}).get("data", "")) == "success"
+
+    def set_schedule_state(self, task_name: str, paused: bool) -> dict:
+        """暂停/恢复定时任务。
+
+        平台**没有** set-state 语义的接口：`POST /schedule/task/{id}/state` 是**切换**接口，
+        传 `{"value": n}` 的 body 会被忽略、每次调用把 taskState 取反（实测 2026-10-24）。
+        所以这里先读当前状态，只在需要时点一次切换，再回读确认。
+
+        `taskState.value`：0 = 启用，1 = 暂停。
+        """
+        task = self.get_schedule(task_name)
+        if not task:
+            raise ApiError(f"任务不存在: {task_name}")
+        task_id = task.get("id")
+        current = (task.get("taskState") or {}).get("value")
+        desired = 1 if paused else 0
+        action = "pause" if paused else "resume"
+        if current not in (0, 1):
+            raise ApiError(
+                f"任务 {task.get('taskName')} 的状态为 {current!r}（不是 0/1；实测 2 疑似已结束/停止），"
+                "平台切状态接口是切换语义、无法确定目标值，拒绝自动切换；请人工在平台确认")
+        if current == desired:
+            return {"action": action, "task_name": task.get("taskName"), "task_id": task_id,
+                    "paused": paused, "changed": False, "task_state": current}
+        url = f"{self.config.workspace}/decision/v10/schedule/task/{task_id}/state"
+        resp = self._http.request(
+            "POST", url, json={"value": desired},
+            headers={"Authorization": f"Bearer {self.token_mgr.get_valid_token()}",
+                     "Content-Type": "application/json"})
+        _unwrap_json(resp, "切换任务状态")
+        after = self.get_schedule(task_id)
+        actual = (after.get("taskState") or {}).get("value")
+        if actual != desired:
+            raise ApiError(
+                f"任务状态切换未生效：期望 {'暂停' if paused else '启用'}（value={desired}），"
+                f"回读 value={actual}；任务 {task.get('taskName')}（{task_id}）")
+        return {"action": action, "task_name": after.get("taskName"), "task_id": task_id,
+                "paused": paused, "changed": True, "task_state": actual}
 
     def get_schedule_history(self, task_name: str = None, limit: int = 10) -> list[dict]:
         """获取定时任务执行历史"""
@@ -910,22 +980,49 @@ class FineReportClient:
             return items[:limit]
         return []
 
-    def search_schedule_records(self, task_name: str, page: int = 1, per_page: int = 20) -> dict:
+    def search_schedule_records(self, task_name: str, page: int = 1, per_page: int = 20,
+                                all_records: bool = False) -> dict:
         """按任务名检索执行记录（比 history 多运行结果与错误信息）
 
         返回 `{total, page, perPage, items}`；items 每项含 logTime / runType /
         logType / detailMessage / filePath / creator / taskId。
+
+        ⚠️ 平台返回顺序**不保证按时间**（实测 page=1 里 10-02、10-01、10-23 混排），
+        需要“最新几条”时必须按 `time` 排序；`all_records=True` 会翻完所有页并按 time 倒序。
         """
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/record/search"
-        resp = self._post(url, json={"taskName": task_name, "page": page, "perPage": per_page})
-        data = _unwrap_json(resp, "查询执行记录").get("data") or {}
-        return {
-            "total": data.get("total", 0),
-            "page": data.get("page", page),
-            "perPage": per_page,
-            "items": data.get("items", []),
-        }
+
+        def fetch(p: int) -> dict:
+            resp = self._post(url, json={"taskName": task_name, "page": p, "perPage": per_page})
+            data = _unwrap_json(resp, "查询执行记录").get("data") or {}
+            return data
+
+        data = fetch(page)
+        items = list(data.get("items", []))
+        total = data.get("total", 0)
+        if all_records:
+            got = len(items)
+            p = page
+            while items and got < total:
+                p += 1
+                more = fetch(p).get("items", [])
+                if not more:
+                    break
+                items.extend(more)
+                got += len(more)
+                if p > 500:  # 防御：异常数据下别无限翻页
+                    break
+
+        def _time_key(item: dict) -> int:
+            try:
+                return int(item.get("time") or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        # 平台分页内顺序不可靠（实测混排）；单页也按 time 倒序，--all 时是整个结果集倒序。
+        items.sort(key=_time_key, reverse=True)
+        return {"total": total, "page": page, "perPage": per_page, "items": items}
 
     def get_schedule_log_detail(self, task_log_id: str) -> dict:
         """获取单条调度日志的详情（节点树，逐节点状态与错误，用于定位失败原因）
@@ -1088,7 +1185,8 @@ class FineReportClient:
 
     def list_schedule_tasks(self, page: int = 1, count: int = 20, all_tasks: bool = False,
                             privilege_type: int = 2) -> dict:
-        """任务列表（带 taskId）。all_tasks=True 走 listAll（不分页，全量返回）。"""
+        """任务列表（带 taskId）。all_tasks=True 走 listAll（不分页，但**只含当前账号创建**的任务，
+        实测 397 vs 名单 1155；要全部任务名用 `list_schedules()` / `schedule list`）。"""
         self._ensure_auth()
         base = f"{self.config.workspace}/decision/v10/schedule/task"
         if all_tasks:

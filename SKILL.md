@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.17
+version: 0.10.18
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -161,16 +161,23 @@ frcli [--version] [-i INSTANCE] [-v]
 │
 └── schedule                        定时任务（生产调度，写操作危险）
     ├── list [-f]                            仅返回任务名
-    ├── tasks [--page P] [-n N] [--all]      任务列表**含 taskId**（--all = listAll 全量）
-    ├── get TASK_NAME [-f]                   任务详情（拿 UUID `id` 用）
+    ├── tasks [--page P] [-n N] [--all]      任务列表**含 taskId**（--all = listAll，只含**本人创建**任务；
+    │                                         全部任务名用 `schedule list`；非 --all 时下一页会 stderr 提示 hasNext）
+    ├── get TASK_NAME|TASK_ID [-f]           任务详情（也接受 UUID taskId；UUID 反查只覆盖本人创建任务）
     ├── exists TASK_NAME                     按准确名字判断任务是否存在
     ├── create CONFIG.yaml                   从 YAML 建任务（YAML 怎么来见 §6.11）
-    ├── update TASK_NAME [-d DESC]           更新（内部先按名查到 id）
+    ├── update TASK_NAME [-d DESC] [-t TEMPLATE]  改描述/模板路径（名字须**精确匹配**）
+    │                                          ⚠️ 平台 PUT 会重置任务状态为启用；本命令会保留原暂停态；
+    │                                             taskState 非 0/1（如 2=已结束）拒绝自动改；--template 先校验路径存在（见 §6.26）
+    ├── pause TASK_NAME                      暂停任务（只切状态，taskState 1，不删任务；名字须精确匹配）
+    ├── resume TASK_NAME                     恢复任务运行（taskState 0；名字须精确匹配）
     ├── delete TASK_ID                       ⚠️ 参数是 UUID `id`，不是任务名（body 为裸数组，见 §6.6）
     ├── run TASK_NAME                        ⚠️ 立即在生产执行该调度
     ├── executing [-f]                       当前正在执行的任务
-    ├── history [TASK_NAME] [-n N] [-f]      执行历史（**按时间升序**，不传名字=最近全局日志）
-    ├── record TASK_NAME [--page P] [-n N]   某任务的执行记录+结果（含 detailMessage/runType）
+    ├── history [TASK_NAME] [-n N] [-f]      执行历史（**按时间升序**，-n N = 最早 N 条；
+    │                                         要最新一条把 -n 调大后取末尾，或 schedule record --all）
+    ├── record TASK_NAME [--page P] [-n N] [--all]  某任务的执行记录+结果（含 detailMessage/runType）
+    │                                          ⚠️ 平台返回顺序不可靠；已按 time 倒序，--all 翻全量后整体倒序
     ├── records [--page P] [-n N]            全平台执行记录（total 十万级）
     ├── log TASK_LOG_ID [-f]                 单条日志详情节点树（哪一步失败、错误内容）
     │                                        ⚠️ TASK_LOG_ID 必须是 history 返回的 id（<任务名>_same_fire_<时间戳>），
@@ -195,7 +202,7 @@ demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
 | 🟠 本地写 | `server add/remove/set-default` | 只改实测环境 `~/.frcli/config.yaml` 与 token 缓存 |
 | 🧱 写范围（**默认拒绝**） | 环境变量 `FRCLI_WRITE_SCOPE=<目录>`，或命令行 `--any-path` | **没设范围又没 `--any-path` → 写命令直接拒绝**（沉默 ≠ 不限制）。设了范围则 `report upload/delete/edit/new/cell/dataset/param/style/table --apply`/`rpc` 写调用只允许落在该目录下，含 `..` 穿越、兄弟目录（`<scope>.tmp`、`<scope>x`）一律拦截 |
 | 🟠 服务端写（轻） | `attach upload/remove` | 只往**服务器附件缓存**写/删文件，不碰报表目录与调度；upload 会在服务端留文件，用完 `remove` 清理 |
-| 🔴 危险 | `schedule create/update/delete/run` | 直接改/跑**生产调度**：`run` 会立刻执行并推送下游（飞书/FTP/邮件），`delete` 不可逆 |
+| 🔴 危险 | `schedule create/update/delete/run/pause/resume` | 直接改/跑**生产调度**：`run` 会立刻执行并推送下游（飞书/FTP/邮件），`delete` 不可逆；`pause/resume` 改变任务启用状态（影响后续定时触发），`update --template` 改任务指向的模板 —— 都先备份 `schedule get` 并向用户确认影响范围 |
 | 🔴 危险 | `report upload` / `report delete` | 直接改**生产模板文件**：影响所有看这张报表的人。upload 覆盖需 `--force`（自动备份原文件）；delete 移入回收站可恢复，但需 `--force`；**目标是目录时必须再加 `--recursive`**（不加直接拒绝） |
 | 🟠 服务端写（模板创作） | `report new` / `cell` / `dataset` / `param` / `style` / `table`（**默认 dry-run，`--apply` 才写**） | 与 `report edit --apply` 同一道写范围守门 + 占锁 + 备份 + 回读 SHA256；新建/改动只应落在你被授权的目录 |
 
@@ -240,7 +247,10 @@ FRCLI_TIMEOUT=600 frcli export batch manifest.yaml
 frcli schedule list -f table
 frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID id
 frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id = logId
-frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录+结果（total 分页）
+frcli schedule record "demo_task_超时明细" --all -n 20             # 执行记录+结果（翻全量、按 time 倒序）
+frcli schedule pause  "demo_任务名"                                # 暂停（只切状态，不删任务）
+frcli schedule update "demo_任务名" --template "demo_group/…/新模板.cpt"   # 改任务指向的模板（保留暂停态）
+frcli schedule resume "demo_任务名"                                # 恢复运行
 frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树：哪一步失败
 #   写操作（🔴 先确认）：create / update / delete <UUID> / run <任务名>
 
@@ -418,7 +428,10 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
   `schedule record` / `schedule records` 里的 `uuid` / `id` 是**执行记录 id**，传进 `log` 平台会报「对象不存在」
   （detail-message 为空，只剩 `Fine-Dec_Default_Error_Tip`）。要定位某次失败：先 `schedule record <任务名>` 看
   `detailMessage`/最近记录，再 `schedule history <任务名>` 取最新 `id` 去 `log`；0.10.15 起传错会直接给这个提示。
-- ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`（倒序，最新在前）。
+- ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`。
+- ⚠️ `schedule record` 的服务端**分页内顺序不保证按时间**（实测同一页出现 10-02、10-01、10-23 混排）：CLI 单页也按 `time` 倒序输出；要跨页取最新记录加 `--all`（翻全量后整体倒序）。
+- ⚠️ 平台 `task/search` 是**子串模糊搜索**且取第一条：`get` 传前缀/错字会命中别的任务（会 stderr 警告）；`update/pause/resume/run` 这类写命令要求**任务名精确匹配**，不匹配直接拒绝。
+- ⚠️ `schedule tasks --all`（`task/listAll/2`）只含**本人创建**的任务（实测 397 vs 名单 1155）：要全部任务名用 `schedule list`；`get/pause/resume/update` 接受 taskId，但 UUID 反查同样只覆盖本人任务。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。
 
 ### 6.7 改模板内容 = 远程设计通道（0.5.0 起已实现，别再找 REST）
@@ -864,6 +877,12 @@ frcli inspect status                                                          # 
 - **数据集缓存开着时取数 0ms**（`db fetch` 全 0），性能数字假快；测性能前必须先关数据集缓存（`share`/`StrategyConfig`，frcli 无开关，需改 cpt XML）。
 - `op=page` 没有 `db fetch`，要看取数耗时用 `--op view`。
 
+### 6.22b 巡检 `db fetch` 里的 SQL 被平台截断为 500 字符
+
+`inspect` 结果 `extra['db fetch'][数据集].sql` **只给前 500 个字符**（平台插件截断，不是 CLI 截；
+实测 2026-10-24 有会话据此误判「SQL 没更新/上传没生效」，白查一轮）。核对完整 SQL 用
+`report datasets <模板> --sql` 或 `report download` 读模板字节；命令检测到 500 字符会在 stderr 提示。
+
 ### 6.23 大报表性能排查：先分「取数 vs 渲染」，再谈 cpt 优化（别把取数等待当渲染）
 
 大报表优化最常见的白干一轮：**没确认耗时归属就去改 cpt 公式/条件属性/合并/扩展**。实测（10 万级单元格的树形报表）
@@ -990,6 +1009,38 @@ REST 的 `POST /v10/dataset/preview` 是**服务器数据集**的管理员接口
   不是 SQL/连接问题。
 - `--params` 的 `null` 按空串替换；布尔等非字符串值用 Python `str()`（`True`/`False`），SQL 里要 `'true'` 请直接传字符串。
 
+### 6.26 改定时任务的模板路径：先 pause，再 update --template，最后 resume
+
+平台**没有**"改任务模板"的 REST 字段语义文档，但实测可行且必须按顺序做：
+
+```bash
+frcli schedule get "demo_任务名" -f json > /tmp/task_backup.json   # 先备份整个任务
+frcli schedule pause "demo_任务名"                                 # 暂停（生产变更，先停再改）
+frcli schedule update "demo_任务名" --template "demo_group/…/新模板.cpt"
+frcli schedule resume "demo_任务名"                                # 验证无误后恢复
+frcli schedule run "demo_任务名"                                   # 可选：用真实任务参数试跑一次
+```
+
+**平台语义（2026-10-24 真机对照）**：
+
+- `taskState.value`：**0 = 启用，1 = 暂停**。
+- 切状态接口是 `POST /decision/v10/schedule/task/{id}/state`，但它是**切换**不是设置：
+  body 里的 `value` 被忽略，每次调用把状态取反。CLI 的 `pause/resume` 会先读状态、按需切一次、再回读校验
+  （重复调用是幂等的，不会来回切）。
+- `PUT /decision/v10/schedule/task` **会重置任务状态为启用**：所以改完模板/描述后，若原来是暂停，
+  必须再切回暂停（`schedule update` 已自动处理并在输出里给 `paused_state_restored`）。
+- `PUT` 的请求体里**必须带 `creator`**：实测剔除 `creator` 后平台会把创建人落库为空
+  （`update_schedule` 已改为回传；命令层再校验 before/after，被清空直接报错）。
+- `PUT` 里 `taskState` 传对象 `{"value":1}` 会报 `Cannot deserialize TaskState out of START_OBJECT`；
+  传数字也会被忽略——状态只能走上面那个切换接口。
+- 任务搜索 `task/search` 只认**任务名**（且是子串模糊搜索）；传 taskId 会静默返回 `{}`。`schedule get` 会自动用
+  `task/listAll` 反查出任务名（该列表只含**本人创建**任务；其它命令仍以任务名为准，`delete` 才用 UUID）。
+- 实测还存在 **taskState=2**（抽样 7/40，nextFireTime 为空、疑似已结束/停止）：切状态接口对 2 的语义未知，
+  `pause/resume` 直接拒绝；`update` 也拒绝（PUT 会把状态重置为 0，可能把已结束任务静默重新启用）。
+- `--template` 会先用 `templates/all` 校验路径存在（只认 cpt、排除目录）：平台接受任意路径并回 `success`，不校验会把任务静默指向坏模板/目录。
+- `update` 的 PUT 后回读失败（按 id/名字都读不到）不会误报 creator：报「更新已提交但回读失败、状态未知」；
+  若原为暂停会尽力恢复一次。恢复暂停失败时报当前实际状态并给出人工 `schedule pause` 命令。
+
 ## 7. 故障排查
 
 | 现象 | 处理 |
@@ -1019,6 +1070,8 @@ REST 的 `POST /v10/dataset/preview` 是**服务器数据集**的管理员接口
 | `schedule delete` 删不掉 | 传 UUID `id` 而非任务名（§6.6）；0.4.2 起会按裸数组删并校验，旧版报 `deleted: true` 也可能是假成功 |
 | `schedule create` 报 `detached entity passed to persist: ScheduleOutputEntity` | YAML 沿用了源任务的 `scheduleOutput.id`/输出 action id，换成新 UUID（§6.11） |
 | 任务跑完日志缺「自定义类附件处理」 | 那一步是异步的，约 5 分钟后才写日志，别据此判定配置没生效（§6.12） |
+| `schedule update` 报「任务名不完全匹配」/「模板不存在」/ 状态非 0/1 | 平台 task/search 是子串模糊搜索→写命令要求精确任务名；`--template` 先校验路径存在；taskState 2（已结束）拒绝自动改（§6.26） |
+| `schedule pause/update/resume` 后状态不对 | 平台切状态接口是**切换**（每次取反）且 PUT 会重置为启用；`schedule update` 已保留原暂停态，`pause/resume` 幂等。详见 §6.26 |
 | `schedule history -n 1` 拿到的不是最新一次 | 返回按时间**升序**，`-n 1` 是最早那条；放大 `-n` 取最后一条，或改用 `schedule record`（§6.6） |
 | `report preview` 报「数据集 SQL 缺少参数」/「找不到数据连接」/`11300001`/`InvalidClassException` | 分别是：`--params` 没给全（CLI 会列出缺的名字）、连接名失效、SQL 报错（带平台原文）、预览骨架与平台版本不兼容（§6.25） |
 | `report paras` 返回 `[]` | 该报表没有参数 **或路径不存在**（平台对不存在的路径也返回空）；先用 `report list <目录>` 核对路径 |

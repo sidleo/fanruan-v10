@@ -289,9 +289,37 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 
 ### schedule 的参数语义
 
-`get/run/update` 收任务**名**，`delete` 收 UUID **id**（先 `schedule get` 拿）；`get` 内部是模糊搜索取第一条。
+`get/run/update/pause/resume` 收任务**名**（`get` 也接受 UUID taskId 反查），`delete` 收 UUID **id**（先 `schedule get` 拿）；`get` 内部是模糊搜索取第一条。`schedule update` 新增 `--template` 改任务模板、`pause/resume` 切任务状态（语义见下文「定时任务改模板」）。
 `schedule log` 收的是 `schedule history` 返回的 `id`（`<任务名>_same_fire_<时间戳>`）；`record`/`records` 的 `uuid`/`id`
 是**执行记录 id**，传进 `log` 平台报「对象不存在」（3 个真实会话踩过，0.10.15 起错误信息带来源提示）。
+
+### 定时任务改模板/暂停恢复：state 接口是**切换**，PUT 会重置状态、清空 creator
+
+2026-10-24 真机实测（用户会话要把 3 个生产的经营分析任务从 v7 模板换到 v10）：
+
+- `taskState.value`：0=启用，1=暂停；`POST /decision/v10/schedule/task/{id}/state` 是**切换**接口，
+  body `{"value": n}` 会被忽略、每次调用取反 → 想「设为暂停」必须**先读状态，只在需要时点一次**，再回读校验
+  （0.10.18 的 `schedule pause/resume` 就是这么做的，重复调用幂等）。
+- `PUT /decision/v10/schedule/task` **会重置 taskState 为 0（启用）**：暂停着改描述/模板，改完必须再切回暂停
+  （`schedule update` 已自动保留原暂停态并回报 `paused_state_restored`）。
+- `PUT` 请求体里**必须带 `creator`**：剔掉它平台会把创建人清空（0.10.18 起 `update_schedule` 回传 creator 并在命令层校验）。
+- `PUT` 里带 `taskState` 对象会报 `Cannot deserialize TaskState out of START_OBJECT`；带数字也被忽略。
+- `task/search` 只认任务名，传 taskId 静默返回 `{}`；`schedule get` 已支持 UUID 反查（listAll → 任务名）。
+- 改生产任务属生产变更：先 `schedule get > backup.json` 备份，再按 pause → update --template → 验证导出 → resume，
+  绝不能不看状态直接 PUT（会把暂停的任务悄悄恢复运行）。
+- **task/search 是子串模糊搜索**（取第一条）：`get` 传前缀会命中别的任务（stderr 警告），`update/pause/resume/run`
+  要求名字精确匹配，不匹配直接拒绝——防止打错字改错任务。
+- **`tasks --all`（listAll）只含本人创建的任务**（实测 397 vs 名单 1155）；全部任务名用 `schedule list`。
+- **存在 taskState=2**（抽样 7/40，疑似已结束/停止）：`pause/resume` 拒绝切换、`update` 拒绝 PUT（PUT 会把状态重置为 0，
+  可能误重启已结束任务）。
+- `update --template` 先用 `templates/all` 校验路径存在（平台接受任意路径并回 success，不校验会静默指向坏模板）。
+- `update` 的 PUT 后回读失败 → 报「已提交但回读失败、状态未知」，原暂停则尽力恢复；恢复暂停失败时报当前状态并给人工命令。
+
+### 巡检 `db fetch` 的 SQL 是截断的（500 字符），别拿它判断 SQL 是否更新
+
+平台插件把 `inspect` 结果 `extra['db fetch'][数据集].sql` 截到前 500 字符；有真实会话据此误判
+「服务器上 SQL 还是旧的/上传没生效」，白查一轮。核对完整 SQL 用 `report datasets <模板> --sql` 或
+`report download`；命令检测到 500 字符会在 stderr 提示。
 
 ### `report datasets` 读不到定义 = 该报表数据集本身报错
 
@@ -467,6 +495,6 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 700 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 735 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

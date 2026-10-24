@@ -47,6 +47,20 @@ def _shape_result(result: dict, report_path: str, op: str, elapsed_ms: int) -> d
     return shaped
 
 
+def _db_fetch_sql_truncated(result: dict) -> bool:
+    """巡检结果的 db fetch SQL 由插件截断为 500 字符（实测 2026-10-24）。
+
+    这是平台侧行为，不是 CLI 截的；千万别拿它判断“服务器上是不是旧 SQL/上传没生效”，
+    要被核对完整 SQL 请用 `report datasets <模板>`（或 report download 读模板字节）。
+    """
+    db_fetch = (result.get("extra") or {}).get("db fetch") or {}
+    for item in db_fetch.values():
+        sql = item.get("sql") if isinstance(item, dict) else None
+        if isinstance(sql, str) and len(sql) >= 500:
+            return True
+    return False
+
+
 def _table_rows(result: dict) -> list:
     """表格视图：整体耗时 + 各环节 + 最慢的单元格。"""
     extra = result.get("extra") or {}
@@ -143,6 +157,11 @@ def run_cmd(report_path, op, params, timeout, raw, fmt, instance):
             result = client.run_inspection(
                 report_path, op=op, params=params_dict, timeout=timeout)
         elapsed_ms = int((time.monotonic() - started) * 1000)
+        if _db_fetch_sql_truncated(result):
+            click.echo(
+                "⚠️ 巡检结果里 db fetch 的 sql 字段被平台截断为 500 字符（非 CLI 截断）："
+                "不要用它核对 SQL 内容或判断上传是否生效；完整 SQL 用 `report datasets <模板>`"
+                "（或 report download 读模板字节）。", err=True)
         if raw:
             out = result
         else:
