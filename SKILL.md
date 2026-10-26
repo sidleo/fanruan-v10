@@ -1,6 +1,6 @@
 ---
 name: fanruan-v10
-version: 0.10.18
+version: 0.10.19
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
   requires:
@@ -1040,6 +1040,18 @@ frcli schedule run "demo_任务名"                                   # 可选�
 - `--template` 会先用 `templates/all` 校验路径存在（只认 cpt、排除目录）：平台接受任意路径并回 `success`，不校验会把任务静默指向坏模板/目录。
 - `update` 的 PUT 后回读失败（按 id/名字都读不到）不会误报 creator：报「更新已提交但回读失败、状态未知」；
   若原为暂停会尽力恢复一次。恢复暂停失败时报当前实际状态并给出人工 `schedule pause` 命令。
+
+### 6.27 报表数值对账：先对齐用户看的是哪一页/哪一区，再用加权平均不变量定位混口径
+
+真实会话（折价日报，10-26）：用户报「大区折价占比都比全国小很多」。先在 MTD 页用最新导出与 SQL 验算，15.91% 完全一致——但用户看的是**昨日页**；真正的 bug 在昨日页大区占比区：分子绑 `sales_qty_zj_td`（数量）、分母绑 `sales_amt_td`（金额），数量÷金额只有 1% 量级；MTD 页是金额÷金额（正确）。别先用「数据没问题/你的预期不对」结案。
+
+对账顺序：
+
+1. **先对齐口径轴**：用户看的是哪个 sheet（昨日/MTD）、哪一区域（汇总/大区/自营联营）、哪组参数日期、哪份文件（旧导出 mtime）。把截图数值先与导出文件逐项对上，再谈对错。
+2. **占比类先验不变量**：各分组按分母加权平均必须等于总体（本次各大区加权 15.92% ≈ 全国 15.91% 通过；某组 1% 而总体 19% ⇒ 几乎必然是分子分母混口径/引用错列）。
+3. **读模板绑定，不要猜导出值**：`report download` 后解析 `<C c= r=>` 的 `columnName`/公式，比较同一指标在不同 sheet/区域的绑定是否同口径（数量列、金额列混用是本次真因）。
+4. 修绑定用 `report cell --at ... --bind ... --apply`（模板被设计器占用会报锁，先让用户关 Designer）；**改绑口径必须同步改表头文字**（本次 O4/P4 表头仍写「销售量」、实际绑金额）。
+5. 改数据集 SQL：先独立 SQL 对拍，再 `report dataset --set-sql`，改后回读 + 导出核对；`select *` 的 CTE 里重命名同名列会被 Impala 拒（`duplicated inline view column alias`），要显式列；显式列会改变 TOP-N 商品池，结果有 0.0x% 级变动要主动向用户说明。
 
 ## 7. 故障排查
 
