@@ -319,6 +319,10 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 
 真实会话（折价日报）：用户报「大区占比都比全国小很多」，agent 先在 MTD 页验算证明数据对，实际 bug 在**昨日页**大区占比区——分子绑 `sales_qty_zj_td`（数量）、分母绑 `sales_amt_td`（金额），数量÷金额只有 1% 量级。对账顺序：①对齐用户看的 sheet/区域/参数/文件版本；②占比类验「分组按分母加权平均 = 总体」（不成立多半是混口径）；③读模板 `<C>` 绑定而非猜导出值；④`report cell --bind` 改绑后同步改表头；⑤改数据集 SQL 先独立对拍再 `report dataset --set-sql`、改后回读导出核对。完整步骤见 SKILL §6.27。
 
+### 从含同名 .py 的目录跑 frcli 会崩（cwd 遮蔽标准库）
+
+`/tmp` 里留了临时脚本 `inspect.py` 后，`cd /tmp && frcli …` 启动即 Traceback（`click/core.py` 的 `import inspect` 命中该文件，随后读 `~/.pm2/dump.pm2` 报 FileNotFoundError）。Python 把 cwd 放进 `sys.path` 最前，cwd 里与标准库/依赖同名的 `.py` 会抢先命中。处理：换干净目录运行，或重命名/删除同名脚本；临时脚本别用 stdlib 模块名，集中放 `/tmp/<任务名>/` 并清理。另：`report info` 无版本/时间字段，`report versions` 只覆盖远程设计/CLI 写入的提交历史——判断模板是否最新看导出数据日期/文件 mtime。
+
 ### 巡检 `db fetch` 的 SQL 是截断的（500 字符），别拿它判断 SQL 是否更新
 
 平台插件把 `inspect` 结果 `extra['db fetch'][数据集].sql` 截到前 500 字符；有真实会话据此误判
