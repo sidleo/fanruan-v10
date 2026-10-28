@@ -723,7 +723,9 @@ def plan_dataset(text: str, op: str = None, name: str = None, conn: str = None,
         # 会 fail closed 抛错，这里跳过告警而不是让删数据集失败（保持 HEAD 语义）。
         try:
             dangling = [c["a1"] for c in cptxml.cells(new_text) if c.get("dataset") == name]
-        except ApiError:
+        except ApiError as exc:
+            if "聚合报表" not in str(exc):
+                raise
             dangling = []
         if dangling:
             changes.append({"kind": "warning",

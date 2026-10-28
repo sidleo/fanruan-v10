@@ -63,11 +63,24 @@ def test_normalize_create_config_taskstate_object_and_readonly():
 
 
 @pytest.mark.parametrize(
-    "bad,expected",
-    [({"value": "1"}, 1), ({"value": None}, 0), ("paused", 0), (None, 0), (True, 0), ([1], 0)],
+    "raw,expected",
+    [({"value": "1"}, 1), ({"value": None}, 0), (None, 0), (True, 1), (False, 0),
+     ("1", 1), (" 0 ", 0), (1, 1)],
 )
-def test_normalize_create_config_taskstate_bad_types(bad, expected):
-    assert normalize_create_config({"taskState": bad})["taskState"] == expected
+def test_normalize_create_config_taskstate_semantics(raw, expected):
+    assert normalize_create_config({"taskState": raw})["taskState"] == expected
+
+
+@pytest.mark.parametrize("bad", ["paused", [1], {"value": 2}, 2, {"value": "x"}])
+def test_normalize_create_config_rejects_unknown_taskstate(bad):
+    """非 0/1 不能静默改成启用：已经结束/停止的状态拿去建任务会误导。"""
+    with pytest.raises(ApiError):
+        normalize_create_config({"taskState": bad})
+
+
+def test_normalize_create_config_strips_top_level_id():
+    out = normalize_create_config({"id": "tid-1", "taskName": "t", "taskState": 0})
+    assert "id" not in out
 
 
 def test_create_schedule_posts_normalized_payload():
@@ -139,6 +152,15 @@ def test_report_list_empty_prints_permission_hint(monkeypatch):
     monkeypatch.setattr(report_cmd, "get_client", lambda inst=None: fake)
     res = CliRunner().invoke(report_cmd.report_group, ["list", "some/dir"])
     assert "无该目录权限" in res.stderr and "报表不存在" in res.stderr
+
+
+def test_report_list_empty_with_keyword_does_not_claim_permission(monkeypatch):
+    """--keyword/--type 无匹配是正常结果，不该提示「无权限」。"""
+    fake = _FakeClient()
+    monkeypatch.setattr(report_cmd, "get_client", lambda inst=None: fake)
+    res = CliRunner().invoke(
+        report_cmd.report_group, ["list", "some/dir", "--keyword", "nomatch"])
+    assert "无权限" not in res.stderr
 
 
 def test_report_datasets_permission_error_prints_hint(monkeypatch):

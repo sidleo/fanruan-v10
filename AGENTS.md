@@ -336,7 +336,8 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 
 从 `schedule get` 派生建任务配置时，`taskState` 是对象 `{"value":0}`，直接 create 会被平台 Jackson 报
 `Cannot deserialize instance of com.fr.schedule.base.type.TaskState out of START_OBJECT`（200 + HTML 出错页）；
-必须改枚举整数 0/1，并删 `nextFireTime`/`preFireTime`/`editable`/`originTaskId`。0.10.23 起 CLI 自动规范化这两类字段。
+必须改枚举整数 0/1（0.10.24 起 CLI 自动归一 `taskState` 并剥离 `id`/`nextFireTime`/`preFireTime`/`editable`/`originTaskId`；
+非 0/1 的 taskState 直接报错，避免把已结束任务静默创建成启用）。
 
 ### 定时任务触发方式不影响推送登记；经营分析平台模板 frcli 读不了
 
@@ -525,6 +526,6 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
 | 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md` 的 `metadata.version`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 770 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 779 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

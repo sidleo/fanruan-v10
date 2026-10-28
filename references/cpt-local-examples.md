@@ -67,8 +67,8 @@ frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --sh
 官方样例 `doc/Advanced/多表头报表.cpt` 的 `Report` 是 `PolyWorkSheet`，其直接子元素包含
 两个 `Block`，各自内含 `CellElementList` 和 `PECBAttr`。一次结构检查得到 25 + 154 = 179 格；
 两个区块各有一个 `A1`。`PECBAttr` 的 `blockName`、`x/y/width/height` 定义分别保存于各块。
-        注意 `report page/highlight/link/chart --list` 这类基于普通网格的只读命令遇到聚合报表
-        也会明确报错（fail closed），请用 `local-inspect` 按块查看。
+注意 `report page/highlight/link/chart --list` 这类基于普通网格的只读命令遇到聚合报表
+也会明确报错（fail closed），请用 `local-inspect` 按块查看。
 
 - `--cells` 每行带 `block_index` 和 `block_name`；`--block 2` 的序号是工作表中块的 1 基顺序。
 - `bounds` 为模板中原始坐标值，不应当成全表单元格坐标；未知块类型若无 `CellElementList`，

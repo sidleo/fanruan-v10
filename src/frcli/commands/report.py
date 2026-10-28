@@ -134,12 +134,18 @@ def list_reports(directory, keyword, file_type, fmt, instance):
         with client:
             data = client.list_reports(directory, keyword=keyword, file_types=file_type)
             output_data(data, format=fmt, title=f"报表文件: {directory}")
-            if isinstance(data, list) and not data:
-                click.echo(
-                    "提示：空列表可能是目录确实没有模板，或当前账号无该目录权限"
-                    "（平台模板树只返回有权限的节点，无权限目录连名字都不返回）。"
-                    "核对：`frcli report list <上级目录>` 或 `frcli report list /`；"
-                    "不要据此判断「报表不存在」。", err=True)
+            if isinstance(data, list) and not data and not keyword and not file_type:
+                if directory in ("/", ""):
+                    click.echo(
+                        "提示：根目录返回空通常不是「没有报表」，而是认证/服务异常"
+                        "（`report list /` 是全量树，正常不该为空）；先用 `frcli server test` "
+                        "复核账号与平台状态。", err=True)
+                else:
+                    click.echo(
+                        "提示：空列表可能是目录确实没有模板，或当前账号无该目录权限"
+                        "（平台模板树只返回有权限的节点，无权限目录连名字都不返回）。"
+                        "核对：`frcli report list <上级目录>` 或 `frcli report list /`；"
+                        "不要据此判断「报表不存在」。", err=True)
     except Exception as e:
         error(e)
 

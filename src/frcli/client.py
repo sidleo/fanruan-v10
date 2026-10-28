@@ -250,26 +250,42 @@ def assert_export_magic(path, fr_format: str):
 
 
 #: 平台 create 接口会反序列化的只读字段：从 schedule get 派生配置时必须剔除。
-_SCHEDULE_CREATE_READONLY = ("nextFireTime", "preFireTime", "editable", "originTaskId")
+#: `id` 也必须剥离：沿用源任务 id 会被平台当作已有对象（或直接按 update 语义处理）。
+_SCHEDULE_CREATE_READONLY = ("id", "nextFireTime", "preFireTime", "editable", "originTaskId")
+
+
+def _normalize_task_state(value):
+    """把载荷里的 taskState 归一成枚举 0/1；非法值报可操作的错误而不是静默改状态。"""
+    if isinstance(value, dict):
+        value = value.get("value", 0)
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        state = value
+    elif isinstance(value, str) and value.strip().lstrip("+-").isdigit():
+        state = int(value.strip())
+    else:
+        raise ApiError(
+            f"taskState 必须是 0（启用）或 1（暂停），载荷里给的是 {value!r}；"
+            "删掉 taskState 或改成整数（0/1）后重试。")
+    if state not in (0, 1):
+        raise ApiError(
+            f"taskState 只支持 0（启用）/1（暂停），收到 {state}。"
+            "已结束/停止状态不能拿来创建任务：删掉 taskState 或改成 0/1 后重试。")
+    return state
 
 
 def normalize_create_config(config: dict) -> dict:
     """规范化 `schedule create` 载荷（不改调用方传入的 dict）。
 
-    - `taskState` 必须给枚举整数：对象 `{"value": n}` 取 n（缺省 0），其它非法类型按 0（启用）。
-    - 剔除只读字段：`nextFireTime`/`preFireTime`/`editable`/`originTaskId`。
+    - `taskState` 归一成枚举 0/1（对象 `{"value": n}`、数字串、布尔都按语义解析；
+      缺失按 0；其它值报 ApiError，不静默把暂停/未知状态改成启用）。
+    - 剔除只读字段：`id`/`nextFireTime`/`preFireTime`/`editable`/`originTaskId`。
     """
     data = dict(config or {})
-    ts = data.get("taskState")
-    if isinstance(ts, dict):
-        value = ts.get("value", 0)
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            value = 0
-        data["taskState"] = value
-    elif isinstance(ts, bool) or not isinstance(ts, int):
-        data["taskState"] = 0
+    data["taskState"] = _normalize_task_state(data.get("taskState"))
     for field in _SCHEDULE_CREATE_READONLY:
         data.pop(field, None)
     return data
@@ -280,7 +296,7 @@ def _taskstate_object_hint(message: str) -> str:
     if "TaskState" in message and "START_OBJECT" in message:
         return ("提示：载荷里的 taskState 是对象，平台只收枚举整数。"
                 "把 taskState 改成 0（启用）或 1（暂停），并删除 "
-                "nextFireTime/preFireTime/editable/originTaskId 后重试。")
+                "id/nextFireTime/preFireTime/editable/originTaskId 后重试。")
     return ""
 
 

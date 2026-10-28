@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.10.23
+  version: 0.10.24
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -636,8 +636,9 @@ frcli schedule create new.yaml
   重置成新 UUID 后同一个 YAML 立刻建成功。
 - **`taskState` 必须改成枚举整数**（实测 2026-10-28）：从 `schedule get` 原样复制的是对象 `{"value":0}`，
   create 会报 `Cannot deserialize instance of com.fr.schedule.base.type.TaskState out of START_OBJECT token`
-  （200 + HTML 出错页）。改成 `0`（启用）/`1`（暂停），并删除 `nextFireTime`/`preFireTime`/`editable`/`originTaskId`；
-  0.10.23 起 CLI 会**自动规范化**这两类字段（对象取 value、只读字段剥离），手工载荷同样建议按此清理。
+  （200 + HTML 出错页）。0.10.24 起 CLI 会**自动规范化**：`taskState` 对象/数字串/布尔按语义归一成 0/1，
+  其它值（如 2=已结束）直接报错而不是静默改成启用；同时自动剥离 `id`/`nextFireTime`/`preFireTime`/`editable`/`originTaskId`。
+  手工载荷建议按此清理。
 - `update`（PUT）只改了描述/参数这类字段时是安全的：PUT 会保留未动的字段（实测改 `taskParameter` 后
   `baseName` / `triggerGroup` / `outputActionList` 原样保留）；但它改不掉 `creator`。
 - `create` 也支持「只执行一次」这类配置：`triggerGroup.triggers` 里 `triggerType:"1"` + `startType/endType:1`，
