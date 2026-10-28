@@ -594,7 +594,12 @@ def pick_sheet(text: str, sheet: str = None) -> Element:
 
 def cell_container(text: str, sheet: str = None):
     """某 sheet 的 `<CellElementList>`（可能不存在 / 是自闭合的）。"""
-    return _first_child(text, pick_sheet(text, sheet), "CellElementList")
+    report = pick_sheet(text, sheet)
+    if report.attrs.get("class", "").rsplit(".", 1)[-1] == "PolyWorkSheet":
+        raise ApiError("这是聚合报表（PolyWorkSheet），单元格分布在独立区块中；"
+                       "report cell/table 等普通网格操作不支持该版面。"
+                       "请先下载原始 CPT，再用 report local-inspect --cells 按区块查看")
+    return _first_child(text, report, "CellElementList")
 
 
 def _first_direct(text: str, parent: Element, name: str):
@@ -665,7 +670,9 @@ def _classify_o(text: str, o: Element) -> dict:
                 # `<Result>`（本列值再套一层表达式）与 `<Condition>`（本格行过滤）
                 "ds_result": _ds_result_of(text, o),
                 "ds_filter": _ds_filter_of(text, o)}
-    if cls == FORMULA_CLASS or cls.endswith("." + FORMULA_CLASS):
+    # 官方示例同时存在旧式 t="Formula"/class="Formula" 和新版 XMLable 公式。
+    if ((t == "Formula" and cls in ("", "Formula")) or
+            cls == FORMULA_CLASS or cls.endswith("." + FORMULA_CLASS)):
         attrs = _first_direct(text, o, "Attributes")
         return {"kind": "formula",
                 "formula": (attrs.text(text).strip() if attrs else "")}

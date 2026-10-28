@@ -23,7 +23,7 @@
 
 ```
 fanruan_v10/
-├── SKILL.md              # agent 入口（frontmatter: name/version/description/metadata）
+├── SKILL.md              # agent 入口（frontmatter: name/description/metadata.version）
 ├── README.md             # 人类可读说明
 ├── AGENTS.md             # 本文件
 ├── CLAUDE.md             # -> AGENTS.md（软链，相对路径）
@@ -106,7 +106,7 @@ fanruan_v10/
 | 记 | 命令增删改同步 `SKILL.md` + `README.md`；新坑点写进 SKILL.md §6 与本文「实测坑点」 |
 | 巡 | `~/frre/venv/bin/python tools/scan_sessions.py [--date D / --days N]` —— 扫 DSH 会话里 frcli 的使用痕迹（用户诉求 + 报错），产出优化线索。**默认扫昨天**；每天 0 点有定时任务自动跑一轮（验证后再改，见下） |
 
-版本号三处保持一致：`src/frcli/__init__.py` 的 `__version__`、`pyproject.toml` 的 `version`、`SKILL.md` front-matter 的 `version`。
+版本号三处保持一致：`src/frcli/__init__.py` 的 `__version__`、`pyproject.toml` 的 `version`、`SKILL.md` frontmatter 的 `metadata.version`。
 
 ## 行为约束
 
@@ -134,6 +134,15 @@ fanruan_v10/
 - **不要顺手改无关代码**：只动与本次需求相关的文件。
 
 ## 实测坑点速查
+
+### 本地示例中的聚合报表不是空网格
+
+`PolyWorkSheet` 的 `<Block>` 各自拥有 `<CellElementList>`，同一工作表的多个块都可能有 `A1`。
+普通网格解析不能只读工作表直接子节点，否则会把有数据的聚合报表误判为空。
+`report local-examples` / `report local-profile` / `report local-inspect --design/--cells`
+可离线检索、批量提炼设计手法并按块查看；普通网格命令不支持聚合块并应明确拒绝。
+旧式 `<O t="Formula" class="Formula">` 也要识别为公式。
+示例 XML 的结构验证不等于渲染、交互或导出验收。
 
 ### 导出「成功」可能是 HTML 出错页面
 
@@ -230,7 +239,7 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 所以看到「某格很慢」先看 `db fetch`，否则会把取数等待当渲染开销 —— 实测 cpt 层改公式/过滤/合并/扩展**全部无效**（取数占 95%+）。
 取数主导就查 impala profile；渲染主导再做 cpt 对照实验。**测性能前必须关数据集缓存**（缓存命中取数 0ms，数字假快）。
 另：`dim_flag` 等维度档位先查有没有白算（v7 93s 里 76% 白算在两个没用档位，砍档位 146s→22.7s）；单次导出切断点实测 ~443s。
-完整流程：SKILL §6.23 / KB `永辉/帆软/fine_report/cpt技巧/帆软大报表性能排查先分取数与渲染`。
+完整流程：SKILL §6.23 / 本地知识库条目 `帆软大报表性能排查先分取数与渲染`。
 
 ### 并发导出：0.10.16 起登录跨进程串行；余下是链路 reset / 网关 504
 
@@ -322,6 +331,19 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 ### 从含同名 .py 的目录跑 frcli 会崩（cwd 遮蔽标准库）
 
 `/tmp` 里留了临时脚本 `inspect.py` 后，`cd /tmp && frcli …` 启动即 Traceback（`click/core.py` 的 `import inspect` 命中该文件，随后读 `~/.pm2/dump.pm2` 报 FileNotFoundError）。Python 把 cwd 放进 `sys.path` 最前，cwd 里与标准库/依赖同名的 `.py` 会抢先命中。处理：换干净目录运行，或重命名/删除同名脚本；临时脚本别用 stdlib 模块名，集中放 `/tmp/<任务名>/` 并清理。另：`report info` 无版本/时间字段，`report versions` 只覆盖远程设计/CLI 写入的提交历史——判断模板是否最新看导出数据日期/文件 mtime。
+
+### `schedule create` 载荷要从 `schedule get` 结果清理只读字段
+
+从 `schedule get` 派生建任务配置时，`taskState` 是对象 `{"value":0}`，直接 create 会被平台 Jackson 报
+`Cannot deserialize instance of com.fr.schedule.base.type.TaskState out of START_OBJECT`（200 + HTML 出错页）；
+必须改枚举整数 0/1，并删 `nextFireTime`/`preFireTime`/`editable`/`originTaskId`。0.10.23 起 CLI 自动规范化这两类字段。
+
+### 定时任务触发方式不影响推送登记；经营分析平台模板 frcli 读不了
+
+网页 ▶ 与 `frcli schedule run` 同调 `POST /schedule/task/{id}/once`，不改配置；推送管理文件行由任务成功跑完自动登记，
+与触发方式无关（「搜不到」先查分页/加载/筛选）。经营分析平台（另一套决策平台）的 cpt 无接口权限：
+`report datasets` 报「该接口需管理员」、`report download` 报 REPORT_NOT_FOUND、`report list` 看不到——
+不是 CLI 故障，改用平台元数据表反查模板 SQL（内部表与查法见本地知识库）；不要用 frcli 反复尝试。
 
 ### 巡检 `db fetch` 的 SQL 是截断的（500 字符），别拿它判断 SQL 是否更新
 
@@ -499,10 +521,10 @@ REST 的 `/v10/dataset/preview` 是**服务器数据集**接口、需管理员�
 
 | 类别 | 检查项 |
 |------|--------|
-| 结构 | `SKILL.md` frontmatter 完整（name/version/description/metadata.requires.bins）；**`name` 必须是 `fanruan-v10`**（匹配 `^[a-z0-9]+(-[a-z0-9]+)*$`，否则宿主静默不加载） |
+| 结构 | `SKILL.md` frontmatter 完整（name/description/metadata.version/metadata.requires.bins）；**`name` 必须是 `fanruan-v10`**（匹配 `^[a-z0-9]+(-[a-z0-9]+)*$`，否则宿主静默不加载） |
 | 自举 | `python references/run.py --version` 与 `cd src && python -m frcli --version` 均可用 |
-| 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md`） |
+| 一致性 | 三处版本号一致（`__init__.py` / `pyproject.toml` / `SKILL.md` 的 `metadata.version`） |
 | 软链 | `ls -l CLAUDE.md CODEBUDDY.md` 显示 `-> AGENTS.md`，且 AGENTS.md 不是软链 |
-| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 735 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
+| 测试 | `python -m pytest tests/` 必须 **0 failed**（2026-10 基线 770 passed / 2 skipped，passed 数随用例增长）；至少 1 条只读命令真实跑通 |
 | 文档 | 命令增删改已同步 `SKILL.md` + `README.md`；坑点有实测依据 |
 | 安全 | 无账号/密码/token 入库；危险操作在 SKILL.md 标 🔴 |

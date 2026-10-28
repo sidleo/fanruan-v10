@@ -249,6 +249,41 @@ def assert_export_magic(path, fr_format: str):
                 _read_error_page_text(path) if html_form else head.decode("utf-8", "replace")))
 
 
+#: 平台 create 接口会反序列化的只读字段：从 schedule get 派生配置时必须剔除。
+_SCHEDULE_CREATE_READONLY = ("nextFireTime", "preFireTime", "editable", "originTaskId")
+
+
+def normalize_create_config(config: dict) -> dict:
+    """规范化 `schedule create` 载荷（不改调用方传入的 dict）。
+
+    - `taskState` 必须给枚举整数：对象 `{"value": n}` 取 n（缺省 0），其它非法类型按 0（启用）。
+    - 剔除只读字段：`nextFireTime`/`preFireTime`/`editable`/`originTaskId`。
+    """
+    data = dict(config or {})
+    ts = data.get("taskState")
+    if isinstance(ts, dict):
+        value = ts.get("value", 0)
+        try:
+            value = int(value)
+        except (TypeError, ValueError):
+            value = 0
+        data["taskState"] = value
+    elif isinstance(ts, bool) or not isinstance(ts, int):
+        data["taskState"] = 0
+    for field in _SCHEDULE_CREATE_READONLY:
+        data.pop(field, None)
+    return data
+
+
+def _taskstate_object_hint(message: str) -> str:
+    """平台仍报 TaskState START_OBJECT 时给可操作提示（规范化没覆盖到的载荷）。"""
+    if "TaskState" in message and "START_OBJECT" in message:
+        return ("提示：载荷里的 taskState 是对象，平台只收枚举整数。"
+                "把 taskState 改成 0（启用）或 1（暂停），并删除 "
+                "nextFireTime/preFireTime/editable/originTaskId 后重试。")
+    return ""
+
+
 def _unwrap_json(resp: httpx.Response, what: str) -> Any:
     """解析决策平台 JSON 响应，出错时抛出平台给的真实原因。
 
@@ -904,13 +939,28 @@ class FineReportClient:
         return {}
 
     def create_schedule(self, config: dict) -> str:
-        """创建定时任务"""
+        """创建定时任务。
+
+        ⚠️ 平台对只读字段也会做反序列化：从 `schedule get` 原样复制的 `taskState` 是
+        `{"value": 0}` 对象，直接 POST 会被 Jackson 报
+        `Cannot deserialize instance of com.fr.schedule.base.type.TaskState out of START_OBJECT`
+        （200 + HTML 出错页）。创建前统一规范化：
+        - `taskState` 对象 → 枚举整数（取 value，缺省 0=启用）
+        - 剔除 nextFireTime/preFireTime/editable/originTaskId 这些只读字段
+        """
         self._ensure_auth()
         url = f"{self.config.workspace}/decision/v10/schedule/task"
-        resp = self._post(url, json=config)
+        resp = self._post(url, json=normalize_create_config(config))
         # 用 _unwrap_json：平台对"任务配置缺字段"等一律回 200 + HTML 出错页，
         # 裸 resp.json() 只会抛 `Expecting value…`（code=UNKNOWN），看不出真正原因。
-        return str((_unwrap_json(resp, "创建定时任务") or {}).get("data", ""))
+        try:
+            data = _unwrap_json(resp, "创建定时任务")
+        except ApiError as e:
+            hint = _taskstate_object_hint(str(e))
+            if hint:
+                raise ApiError(f"{e}\n{hint}") from e
+            raise
+        return str((data or {}).get("data", ""))
 
     def update_schedule(self, task_id: str, config: dict) -> bool:
         """更新定时任务"""

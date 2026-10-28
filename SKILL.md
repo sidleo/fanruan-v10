@@ -1,8 +1,8 @@
 ---
 name: fanruan-v10
-version: 0.10.20
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
+  version: 0.10.23
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -10,7 +10,8 @@ metadata:
 
 # fanruan_v10 Skill（frcli · FineReport V10）
 
-用 `frcli` 操作 FineReport V10 决策平台：浏览模板目录、读数据集 SQL、导出报表、管理定时任务。
+用 `frcli` 操作 FineReport V10 决策平台：浏览模板目录、读数据集 SQL、导出报表、管理定时任务；
+也可以从本地 Demo 批量提炼 CPT 的报表选型、信息层级、版面、视觉、交互与图表手法。
 所有功能通过 `frcli <命令组> <命令>` 调用，`<命令> --help` 查看参数。
 
 ## 1. 何时使用
@@ -23,12 +24,19 @@ metadata:
   `report edit` 定点改**数据集 SQL / 连接 / 参数**（§6.7）；改**单元格**用 `report cell`（§6.14）
 - **从零创作模板**：`report new / dataset / table / cell / param / style` 造出一张能取数的报表
   —— 五步上手与语法速查见 **`references/cpt-authoring.md`**；纯文本+公式+取数表+参数+样式都能写
+- **从本地 Demo 学习设计技巧**：`report local-profile` 批量找同类样板并输出设计画像，
+  `report local-inspect --design/--cells` 查看单份模板和具体格号；选型矩阵、信息层级、视觉/交互规则、
+  代表样例和验收流程见 **`references/cpt-design-from-examples.md`**
 
 不适合：**画复杂版面**（图表控件、填报控件、复杂表头嵌套、决策报表 .frm 的组件布局）——
 这些仍然建议在 Designer 里做。本 CLI 能做的是「单元格网格 + 数据集绑定 + 扩展 + 样式 + 参数」
 这一层，覆盖绝大多数**取数类报表**。
 
 ## 2. 前置条件
+
+仅检索、画像或检查本地 CPT 示例时，使用 `report local-examples/local-profile/local-inspect`，
+不需要配置或启动实例。聚合块和单元格检查见 `references/cpt-local-examples.md`；从样例学习报表设计见
+`references/cpt-design-from-examples.md`。
 
 1. 配置实例（密码会明文写入 `~/.frcli/config.yaml`）：
 
@@ -55,6 +63,11 @@ frcli [--version] [-i INSTANCE] [-v]
 │   └── test [NAME]                          连接 + 登录校验
 │
 ├── report                          报表模板（决策平台目录树）
+│   ├── local-examples DIRECTORY [--keyword K] [--contains TEXT] [-n 30]  离线查找本地 CPT
+│   ├── local-profile DIRECTORY [--keyword K] [--contains TEXT] [--tag T] [-n 20]
+│   │                                                                     批量画像：原型/技术/图表/代表样例
+│   ├── local-inspect FILE [--sheet S] [--block N] [--cells] [--design] [-n 100]
+│   │                                                                     离线检查；聚合块独立坐标
 │   ├── list [DIRECTORY] [--keyword K] [--type cpt]   列目录；⚠️ 目录要具体，`/` = 全量（实测 3873 条）
 │   │                                              `--keyword/--type` 走**服务端筛选**，别拉全量再本地筛
 │   ├── info REPORT [-f]                     报表信息：数据集名清单 + 参数清单
@@ -197,7 +210,7 @@ demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
 
 | 等级 | 命令 | 说明 |
 |------|------|------|
-| 🟢 只读 | `server list/test`、`report list/info/paras/datasets/preview/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
+| 🟢 只读 | `server list/test`、`report local-examples/local-profile/local-inspect/list/info/paras/datasets/preview/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
 | 🟡 计算 | `export *`、`export batch` | 数据只读，但服务端真实跑报表（复杂报表 50s+，批量可达数十分钟）；批量前说明规模 |
 | 🟠 本地写 | `server add/remove/set-default` | 只改实测环境 `~/.frcli/config.yaml` 与 token 缓存 |
 | 🧱 写范围（**默认拒绝**） | 环境变量 `FRCLI_WRITE_SCOPE=<目录>`，或命令行 `--any-path` | **没设范围又没 `--any-path` → 写命令直接拒绝**（沉默 ≠ 不限制）。设了范围则 `report upload/delete/edit/new/cell/dataset/param/style/table --apply`/`rpc` 写调用只允许落在该目录下，含 `..` 穿越、兄弟目录（`<scope>.tmp`、`<scope>x`）一律拦截 |
@@ -621,6 +634,10 @@ frcli schedule create new.yaml
 - **不重置输出 id 的报错**（实测）：`detached entity passed to persist: com.fr.schedule.base.entity.ScheduleOutputEntity`
   —— 服务端把沿用源任务的 `ScheduleOutputEntity.id` 当新实体 persist，直接 200 + HTML 出错页。
   重置成新 UUID 后同一个 YAML 立刻建成功。
+- **`taskState` 必须改成枚举整数**（实测 2026-10-28）：从 `schedule get` 原样复制的是对象 `{"value":0}`，
+  create 会报 `Cannot deserialize instance of com.fr.schedule.base.type.TaskState out of START_OBJECT token`
+  （200 + HTML 出错页）。改成 `0`（启用）/`1`（暂停），并删除 `nextFireTime`/`preFireTime`/`editable`/`originTaskId`；
+  0.10.23 起 CLI 会**自动规范化**这两类字段（对象取 value、只读字段剥离），手工载荷同样建议按此清理。
 - `update`（PUT）只改了描述/参数这类字段时是安全的：PUT 会保留未动的字段（实测改 `taskParameter` 后
   `baseName` / `triggerGroup` / `outputActionList` 原样保留）；但它改不掉 `creator`。
 - `create` 也支持「只执行一次」这类配置：`triggerGroup.triggers` 里 `triggerType:"1"` + `startType/endType:1`，
@@ -1062,11 +1079,76 @@ frcli schedule run "demo_任务名"                                   # 可选�
 - 处理：换到干净目录运行（仓库根/家目录），或重命名、删除 cwd 里的 `inspect.py` / `json.py` / `types.py` / `click.py` 等。
 - 预防：临时脚本不要用标准库模块名；集中放 `/tmp/<任务名>/` 子目录，用完清理。
 
+### 6.29 本地 Demo：检索、设计画像、提炼设计技巧与聚合块检查
+
+本地 `reportlets` 内的 CPT 可离线检索和解析，不读取实例配置，也不启动服务。设计任务按下面走：
+
+```bash
+# 1. 找模板：路径关键词或 XML 原文
+frcli report local-examples "<reportlets目录>" --keyword 分栏
+frcli report local-examples "<reportlets目录>" --contains PolyWorkSheet -n 30
+
+# 2. 找同类代表样板：--tag 可传原型或技术标签
+frcli report local-profile "<reportlets目录>" --tag grouped-table -n 10
+frcli report local-profile "<reportlets目录>" --keyword 销售 --tag chart-linkage -n 10
+
+# 3. 读完整设计画像与具体格号
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --design
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sheet "<sheet名>" --cells -n 200
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sheet "<sheet名>" --block 2 --cells
+```
+
+画像覆盖：`archetype/archetypes`（明细、分组、交叉、图表分析、主从、驾驶舱、填报、聚合、静态版面）、
+`layout`、`data`、`visual`、`interaction`、`charts` 与 `study_points`。`local-profile` 同时返回
+`archetypes`、`techniques`、`chart_types` 分布和 `design_lessons`；样例按 `study_score` 排序，
+按标签检索时先要求目标结构完整，再优先规模小、附带控件/脚本/多 sheet 较少、容易逐格复盘的样板；
+目标技术出现足够次数后不再无限加分，超大综合模板不会仅因能力多而排在最前。
+`score_semantics` 明确该分数只是检索排序分，不是设计质量分；`matched`/`truncated` 与
+`skipped_count` 用来判断是否查全。
+
+用户问“这张报表应怎样设计/选什么图表/如何组织页面”时，不要只返回文件列表：
+
+1. 先确认决策、读者、数据粒度、交互和交付渠道；读
+   `references/cpt-design-from-examples.md` 的原型选择矩阵。
+2. 选 3–5 个同类样板：基准、信息增强、高密度、交互、目标渠道各一份；高复杂度样例不天然更合适。
+3. 用 `--design` 比较整份结构，用 `--cells` 对照分组/扩展/汇总、样式索引、条件属性个数等结构信息（数字格式/链接/图表的具体实现需读该格 XML 或导出对照，别只看画像下结论）。
+4. 提炼 3–7 条可复用规则，并明确哪些业务字段、SQL、参数、品牌和特例阈值不复制。
+5. 映射到 `report new/dataset/param/table/cell/style/crosstab/highlight/page/chart/widget/link`；
+   具体配方查 `cpt-patterns.md` / `cpt-patterns2.md`。
+6. 结构回读、数据对账、预览交互和导出产物分别验收；XML 画像不能代替任何一项。
+
+`PolyWorkSheet` 的 `Block` 有各自的单元格和坐标，两个块都可以有 `A1`；普通 `report cell/table`
+网格操作不支持它，不再把它误报为零格。远端模板需先 `report download` 到本地再检查。
+示例的结构只证明 XML 写法；渲染、交互和导出效果仍需在合适的环境验证。
+检索和聚合块细节见 `references/cpt-local-examples.md`；设计选型、视觉、交互、渠道和验收规则见
+`references/cpt-design-from-examples.md`。
+
+### 6.30 定时任务「首次运行」与推送配置：`schedule run` 与页面 ▶ 是同一个接口
+
+真实会话（10-28）：用户担心「之前用 frcli 首次运行任务，导致后续配不了推送群」，要求只用浏览器点 ▶。实测对照确认：
+网页 ▶ 与 `frcli schedule run` 都调用 `POST /decision/v10/schedule/task/{taskId}/once`，**不修改任务配置**；
+推送管理里的文件行由**任务成功跑完**自动登记，与触发方式无关。首次运行后到「推送管理」按文件名找到行再配群即可。
+
+- 任务没跑过 → 推送管理里搜不到文件名（正常，不是配置失败）；首次运行会先推兜底群 `[推送]未分类报表群`，配好群后改推目标群。
+- 推送管理页面每页只显示 10 条、翻页按钮可能不可用 → 「搜不到」先排除分页/加载/筛选，不要判定行没生成。
+- 配群操作：群配置格**点两下**才出下拉箭头；选完群**直接点提交**（点空白会清空选择）；提示登录失效需重登后重配。
+- 用户对工具路径有疑虑时，先给证据（接口对比/执行记录）再决定用哪种触发方式；`schedule run` 本身不会破坏推送链路。
+
+### 6.31 经营分析平台的 cpt 不要用 frcli 读：无接口权限，改用元数据表反查
+
+**经营分析平台**（与决策平台是两套实例）的模板与决策平台实例不互通：`report datasets` 报
+「当前账号无此接口权限（该接口需管理员）」、`report download` 报 `REPORT_NOT_FOUND`、`report list` 看不到目录——
+**都不是 CLI 故障**。查这类模板的取数口径改用平台元数据反查模板 SQL（内部表名/字段与查询模板
+见本地知识库，不在本仓库记录）；目标模板当天记录为空时查同目录姊妹模板。
+0.10.23 起 `report list`/`report ws-list` 空结果会在 stderr 提示「可能无权限」，`report datasets/download`
+撞权限/找不到时也会提示改用元数据表；别把空结果当成「报表不存在」。
+
 ## 7. 故障排查
 
 | 现象 | 处理 |
 |------|------|
 | `frcli: command not found` | 按 `references/install.md` 自举：`python <base>/references/run.py <命令>` 或 `cd <base>/src && python -m frcli <命令>`（零安装） |
+| `这是聚合报表（PolyWorkSheet）` | 普通网格命令不支持聚合块；先下载原始模板，再用 `report local-inspect ... --cells` 按块检查（§6.29） |
 | `导出产物魔数不符` / `导出被服务端排队` | 服务端返回的是出错页或 `Dec-Waiting_In_Line` 排队页；重试一次通常即成功，批量要降并发（§6.1） |
 | `读取报表数据集 xxx失败: 错误代码:11300001 数据集 [y] 配置错误…` | 该模板里有坏数据集，平台原文已给出**坏数据集名 + SQL 报错**；这是报表本身的问题，不是 CLI 故障（§6.5） |
 | 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，报错里已带平台原文的 `detail-message`（§6.1） |

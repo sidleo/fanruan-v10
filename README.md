@@ -5,7 +5,7 @@ FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill 
 - **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
 - **命令**：`frcli`
 - **源码**：`src/frcli/`
-- **版本**：0.10.16（0.9.0 起：`crosstab`/`highlight`/`page` + `cpt-patterns.md`；0.10.0 起：`chart`/`widget`/`link` + `cpt-patterns2.md`；0.10.13 起：`inspect` 运行时巡检/模板性能分析；0.10.14 起：导出撞 502/503/504 网关超时给出可操作提示；0.10.15 起：`schedule log` 传错 logId 来源给出来源提示；0.10.16 起：并发导出登录跨进程串行（实例级文件锁））
+- **版本**：0.10.23（支持离线检索、批量设计画像与单模板设计检查；可从本地 Demo 提炼报表选型、版面、视觉、交互和图表手法）
 
 ## 安装 / 自举
 
@@ -19,6 +19,30 @@ python references/run.py --version        # 跨平台启动器
 ```
 
 完整自举手册见 `references/install.md`。
+
+## 离线检索并学习 CPT 示例
+
+示例目录由使用者指定，无需连接或配置帆软实例：
+
+```bash
+frcli report local-examples "<reportlets目录>" --keyword 分栏
+frcli report local-examples "<reportlets目录>" --contains PolyWorkSheet
+frcli report local-profile "<reportlets目录>" --tag dashboard -n 10
+frcli report local-profile "<reportlets目录>" --keyword 销售 --tag crosstab -n 10
+frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --design
+frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --cells
+frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --block 2 --cells
+```
+
+`local-profile` 会统计报表原型、设计技术、图表类型，输出整库 `design_lessons` 并排序代表样例；
+`--design` 输出版面、数据、视觉、交互与图表画像，`--cells` 可继续定位到具体格号。按标签检索时，
+先要求目标结构足够完整，再优先规模小、附带控件/脚本/多 sheet 较少、容易逐格复盘的样板；
+目标信号达到学习所需数量后不再无限加权。检索结果会标明 `score_semantics`、总数、截断和跳过情况，
+检查结果区分工作表、聚合块及各块内坐标。
+
+本地结构分析不代表渲染或导出效果已验证。检索与聚合块细节见 `references/cpt-local-examples.md`；
+从 Demo 选择报表原型、提炼视觉与交互规则、实施和验收的完整方法见
+`references/cpt-design-from-examples.md`。
 
 ## 快速开始
 
@@ -142,7 +166,7 @@ FRCLI_TIMEOUT=300 frcli inspect run "…/sales_daily.cpt" --op view --params '{"
 | 命令组 | 用途 | 主要命令 |
 |--------|------|----------|
 | `server` | 多实例配置 | `list` / `add` / `remove` / `set-default` / `test` |
-| `report` | 报表模板 | `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed`（模板认证配置路由，非权限树，见下）/ `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` |
+| `report` | 报表模板 | `local-examples` / `local-profile` / `local-inspect --design/--cells`（本地只读）/ `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed`（模板认证配置路由，非权限树，见下）/ `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` / `crosstab` / `highlight` / `page` / `chart` / `widget` / `link` |
 | `export` | 报表导出 | `pdf` / `excel` / `word` / `image` / `csv` / `batch` |
 | `attach` | 服务器附件 | `upload` / `remove`（附件缓存，不动报表目录） |
 | `system` | 系统与平台信息 | `version` / `health` / `modules` / `authority` / `login-policy` |
@@ -208,6 +232,8 @@ fanruan_v10/
 │   ├── cpt-patterns2.md  # 第二辑：图表/参数控件/钻取超链接/层次坐标/分页（含"写错的对照"与验收通道矩阵）
 │   ├── cpt-features.md   # cpt 语料普查（1602 个官方模板频次 + 片段 + 默认值 + 对照表）
 │   ├── cpt-xml.md        # cpt 结构速查（定点字节读写）
+│   ├── cpt-local-examples.md      # 本地示例查找/画像与聚合报表区块检查
+│   ├── cpt-design-from-examples.md # 从本地示例提炼设计画像、选型矩阵与验收规则
 │   ├── remotedesign.md   # 远程设计 RPC 协议（写模板的底层）+ 复核手册
 │   ├── run.py            # 跨平台启动器（自举 + 软链自愈 + 版本提示）
 │   ├── run.sh            # Unix 便捷入口
@@ -217,6 +243,7 @@ fanruan_v10/
 
 ## 已知限制
 
+- 聚合报表 `PolyWorkSheet` 由多个独立区块构成；`report local-inspect` 可只读检查区块，普通 `report cell/table` 等网格操作不能直接编辑它。
 - 0.8.0 起可**从零创作**模板（`report new/cell/dataset/param/style/table` +
   `crosstab` 交叉表 / `highlight` 条件属性 / `page` 分页设置，见 `references/cpt-authoring.md`
   与 `references/cpt-patterns.md`）；0.5.0 起 `report upload` / `report delete` 走远程设计通道。仍有的限制：

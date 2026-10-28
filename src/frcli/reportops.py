@@ -719,7 +719,12 @@ def plan_dataset(text: str, op: str = None, name: str = None, conn: str = None,
     if op == "remove":
         new_text = cptxml.remove_dataset(new_text, name)
         changes.append({"kind": "dataset.remove", "name": name})
-        dangling = [c["a1"] for c in cptxml.cells(new_text) if c.get("dataset") == name]
+        # 悬空绑定只是告警；聚合报表（PolyWorkSheet）没有普通网格，cptxml.cells()
+        # 会 fail closed 抛错，这里跳过告警而不是让删数据集失败（保持 HEAD 语义）。
+        try:
+            dangling = [c["a1"] for c in cptxml.cells(new_text) if c.get("dataset") == name]
+        except ApiError:
+            dangling = []
         if dangling:
             changes.append({"kind": "warning",
                             "message": f"仍有 {len(dangling)} 个单元格绑定 {name}"

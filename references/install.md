@@ -75,7 +75,7 @@ python <base>/references/run.py server list
 1. **软链自愈**：若 PATH 中已有 `frcli` 软链，但指向的不是当前 skill 的 shim（旧路径 / 失效路径），自动重建指向当前 skill。
 2. **版本提示**：若 `frcli` 来自其他安装（pip 装过、别的 skill 副本），`run.py` 会打印该命令的实际来源路径与当前 skill 内置源码版本，让 agent 判断是否在用旧版。仅提示，不阻断执行。
 
-> 约定：skill 源码更新时同步 bump 版本号（`src/frcli/__init__.py` 的 `__version__` 与 `SKILL.md` front-matter 的 `version`）。
+> 约定：skill 源码更新时同步 bump 版本号（`src/frcli/__init__.py` 的 `__version__` 与 `SKILL.md` frontmatter 的 `metadata.version`）。
 
 ## 3. 自举方式 C —— pip 安装（装进当前 Python 环境）
 
@@ -107,11 +107,14 @@ PYTHONPATH=<base>/src python -m frcli --version
 | `pyyaml` | 读取 `~/.frcli/config.yaml` / batch manifest | `pip install "pyyaml>=6.0"` |
 | `rich` | 表格输出（`-f table`） | `pip install "rich>=13.0"` |
 
-自举完成后，**还需配置实例**（连接信息不随 skill 分发，每台机器各自配置）：
+自举完成后，使用服务端命令还需配置实例（连接信息不随 skill 分发，每台机器各自配置）；
+`report local-examples`、`report local-profile` 和 `report local-inspect` 只读本地文件，不需要配置实例：
 
 ```bash
 frcli server add yh --url https://<服务器> -u <工号> -p '<密码>' --set-default
 frcli server test
+frcli report local-profile "<reportlets目录>" --tag grouped-table -n 10   # 纯本地，可在配置前运行
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --design         # 纯本地
 ```
 
 配置落在 `~/.frcli/config.yaml`，token 缓存在 `~/.frcli/tokens/<实例>.json`。

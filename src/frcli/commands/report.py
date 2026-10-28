@@ -10,7 +10,7 @@ from ..client import FineReportClient
 from ..output import output_data, success, error
 from ..remotedesign import (ALLOW_ANY_ENV, assert_in_write_scope, upload_template,
                             delete_template, workspace_list)
-from .. import reportops
+from .. import local_cpt, reportops
 
 #: 写范围判定本身只有一份（`remotedesign.assert_in_write_scope`），语义是
 #: **fail-closed**：没设 `$FRCLI_WRITE_SCOPE` 就拒绝，`--any-path` 才放行。
@@ -44,10 +44,81 @@ def get_client(instance_name=None) -> FineReportClient:
     return FineReportClient(config)
 
 
+#: 「账号无权限/平台特有路径」类报错的统一提示（经营分析平台模板常见）。
+_PLATFORM_READ_HINT = (
+    "提示：这是「账号无权限」类错误，不是 CLI 故障。若目标是经营分析平台（另一套决策平台）的模板，"
+    "frcli 通常读不了；查这类模板的取数口径请改用平台元数据表反查模板 SQL"
+    "（内部表名与查法见本地知识库）；不要用 frcli 反复尝试。")
+
+
+def _platform_read_error_hint(exc: Exception) -> None:
+    """`report datasets/download` 撞权限/找不到时，在 stderr 给可操作的下一步。"""
+    msg = str(exc)
+    if any(k in msg for k in ("无此接口权限", "该接口需管理员", "远程设计授权目录")):
+        click.echo(_PLATFORM_READ_HINT, err=True)
+
+
 @click.group("report")
 def report_group():
     """管理报表文件"""
     pass
+
+
+def _expand_user_path(value):
+    """展开 `~`：Click 的 Path 不做 shell 展开，用户写 "~/reportlets" 会原样找不到。
+
+    ⚠️ 因此这三个 local-* 命令的 Path 参数**不能带 `exists=True`**：Click 会在
+    回调前先校验，`~/...` 会直接 exit 2，根本到不了这里；存在性由 local_cpt
+    内部（expanduser → resolve）判断并报 ApiError。
+    """
+    return os.path.expanduser(value) if value else value
+
+
+@report_group.command("local-examples")
+@click.argument("directory", type=click.Path(file_okay=False))
+@click.option("--keyword", help="按示例相对路径过滤（不区分大小写）")
+@click.option("--contains", help="按 CPT 的 UTF-8 XML 原文过滤（区分大小写）")
+@click.option("-n", "--limit", type=click.IntRange(1, 1000), default=30,
+              show_default=True, help="最多返回多少条；matched 是全部命中数")
+def local_examples_cmd(directory, keyword, contains, limit):
+    """只读查找本地 CPT 示例；不需要实例配置或联网。"""
+    try:
+        output_data(local_cpt.find_examples(_expand_user_path(directory), keyword, contains, limit))
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("local-profile")
+@click.argument("directory", type=click.Path(file_okay=False))
+@click.option("--keyword", help="按示例相对路径过滤（不区分大小写）")
+@click.option("--contains", help="按 CPT 的 UTF-8 XML 原文过滤（区分大小写）")
+@click.option("--tag", help="只返回含该设计标签或报表原型的样例，例如 crosstab")
+@click.option("-n", "--limit", type=click.IntRange(1, 1000), default=20,
+              show_default=True, help="最多返回多少个代表样例")
+def local_profile_cmd(directory, keyword, contains, tag, limit):
+    """只读扫描本地 CPT，提炼报表原型、设计技术和代表样例。"""
+    try:
+        output_data(local_cpt.profile_examples(_expand_user_path(directory), keyword, contains, tag, limit))
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("local-inspect")
+@click.argument("file", type=click.Path(dir_okay=False))
+@click.option("--sheet", help="选择工作表；默认第一张")
+@click.option("--block", type=click.IntRange(min=1), help="聚合报表的区块序号，从 1 开始")
+@click.option("--cells", is_flag=True, help="同时列出单元格、数据设置与扩展方向")
+@click.option("--design", is_flag=True,
+              help="输出整份模板的报表原型、版面、视觉、交互与图表画像")
+@click.option("-n", "--limit", type=click.IntRange(1, 1000), default=100,
+              show_default=True, help="--cells 最多返回多少格；cell_count 为选定范围的总数")
+def local_inspect_cmd(file, sheet, block, cells, design, limit):
+    """只读检查本地 CPT，聚合报表按区块显示独立坐标。"""
+    try:
+        output_data(local_cpt.inspect_template(
+            _expand_user_path(file), sheet, block, cells, limit, design))
+    except Exception as e:
+        error(e)
 
 
 @report_group.command("list")
@@ -63,6 +134,12 @@ def list_reports(directory, keyword, file_type, fmt, instance):
         with client:
             data = client.list_reports(directory, keyword=keyword, file_types=file_type)
             output_data(data, format=fmt, title=f"报表文件: {directory}")
+            if isinstance(data, list) and not data:
+                click.echo(
+                    "提示：空列表可能是目录确实没有模板，或当前账号无该目录权限"
+                    "（平台模板树只返回有权限的节点，无权限目录连名字都不返回）。"
+                    "核对：`frcli report list <上级目录>` 或 `frcli report list /`；"
+                    "不要据此判断「报表不存在」。", err=True)
     except Exception as e:
         error(e)
 
@@ -193,6 +270,10 @@ def ws_list_cmd(path, fmt, instance):
     try:
         config = load_config(instance)
         data = workspace_list(config, path)
+        if data.get("count") == 0:
+            click.echo(
+                "提示：工作区为空有三种可能——路径不存在、目录确实为空，或账号对该远程设计目录无权限。"
+                "用上一级路径核对；不要据此判断文件不存在。", err=True)
         if fmt == "table":
             output_data(data["entries"], format="table", title=f"工作区: {data['path']}")
         else:
@@ -217,6 +298,7 @@ def download_report(remote_path, output, instance):
                 "local": result,
             })
     except Exception as e:
+        _platform_read_error_hint(e)
         error(e)
 
 
@@ -439,6 +521,7 @@ def report_datasets(report_path, fmt, sql, instance):
                             console.print(f"\n[bold cyan]数据集 {i}: {ds['name']}[/]")
                             console.print(Panel(ds["sql"], title="SQL", border_style="blue"))
     except Exception as e:
+        _platform_read_error_hint(e)
         error(e)
 
 
