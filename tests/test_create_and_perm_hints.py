@@ -163,6 +163,29 @@ def test_report_list_empty_with_keyword_does_not_claim_permission(monkeypatch):
     assert "无权限" not in res.stderr
 
 
+def test_report_datasets_other_errors_do_not_suggest_offline_path(monkeypatch):
+    """只有超时才提示离线快路径；普通 API 错误不能误导。"""
+    fake = _FakeClient()
+    fake.raise_on_datasets = ApiError("HTTP 500 Internal Server Error")
+    monkeypatch.setattr(report_cmd, "get_client", lambda inst=None: fake)
+    res = CliRunner().invoke(
+        report_cmd.report_group, ["datasets", "some/other.cpt"])
+    assert res.exit_code != 0
+    assert "local-inspect" not in res.stderr
+
+
+def test_report_datasets_timeout_suggests_offline_local_inspect(monkeypatch):
+    """大模板 report datasets 超时：提示改用 download + local-inspect --sql 离线看。"""
+    fake = _FakeClient()
+    fake.raise_on_datasets = ApiError(
+        "请求失败: The read operation timed out（当前超时 600s；大模板可能分钟级）")
+    monkeypatch.setattr(report_cmd, "get_client", lambda inst=None: fake)
+    res = CliRunner().invoke(
+        report_cmd.report_group, ["datasets", "some/big.cpt"])
+    assert res.exit_code != 0
+    assert "local-inspect" in res.stderr and "download" in res.stderr
+
+
 def test_report_datasets_permission_error_prints_hint(monkeypatch):
     fake = _FakeClient()
     fake.raise_on_datasets = ApiError(

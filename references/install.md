@@ -115,6 +115,7 @@ frcli server add yh --url https://<服务器> -u <工号> -p '<密码>' --set-de
 frcli server test
 frcli report local-profile "<reportlets目录>" --tag grouped-table -n 10   # 纯本地，可在配置前运行
 frcli report local-inspect "<reportlets目录>/<样例>.cpt" --design         # 纯本地
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql            # 纯本地，看数据集 SQL/连接名
 ```
 
 配置落在 `~/.frcli/config.yaml`，token 缓存在 `~/.frcli/tokens/<实例>.json`。

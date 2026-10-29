@@ -12,6 +12,7 @@ frcli report local-examples "<reportlets目录>" --contains PolyWorkSheet -n 30
 frcli report local-profile "<reportlets目录>" --tag dashboard -n 10
 frcli report local-profile "<reportlets目录>" --keyword 销售 --tag crosstab -n 10
 frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt"
+frcli report local-inspect "<reportlets目录>/<模板>.cpt" --sql   # 数据集 SQL（离线，不触发服务端校验）
 frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --design
 frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --cells -n 100
 frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --sheet sheet1 --block 2 --cells
@@ -59,6 +60,8 @@ frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --sh
 | `interaction` | 控件、提交、超链接、图表联动和 JavaScript |
 | `charts` | 图表数量、类型、标签和提示 |
 
+`--sql` 从本地模板的 `<TableData>/<Query>` 取 SQL，适合大模板：线上 `report datasets --sql` 要服务端全量解析，
+数 MB 模板可能分钟级/超时；先 `report download` 再本地 `--sql` 是离线快路径。
 批量画像适合寻找设计参考；报表该选哪种原型、怎样组织信息层级，用
 `cpt-design-from-examples.md` 的选择矩阵和工作流判断。
 

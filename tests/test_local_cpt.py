@@ -170,6 +170,63 @@ def test_poly_regular_grid_reader_and_editor_fail_closed():
     assert cptxml.cell_rows(CPT, "普通")[0]["text"] == "示例标题"
 
 
+def test_local_inspect_can_extract_dataset_sql_offline(tmp_path):
+    """大模板线上 datasets 慢：本地解析 <TableData>/<Query> 拿 SQL（不触发服务端校验）。"""
+    text = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<WorkBook><TableDataMap>'
+            '<TableData name="ds1" class="com.fr.data.impl.DBTableData">'
+            '<Connection class="com.fr.data.impl.Connection"><DatabaseName>'
+            '<![CDATA[demo_conn]]></DatabaseName></Connection>'
+            '<Query><![CDATA[select * from demo_db.demo_shop]]></Query>'
+            '</TableData>'
+            '<TableData name="embedded" class="com.fr.data.impl.EmbeddedTableData"/>'
+            '</TableDataMap>'
+            '<Report class="com.fr.report.worksheet.WorkSheet" name="sheet1">'
+            '<CellElementList><C c="0" r="0"><O>x</O></C></CellElementList></Report>'
+            '</WorkBook>')
+    source = tmp_path / "with_sql.cpt"
+    source.write_text(text, encoding="utf-8")
+
+    plain = local_cpt.inspect_template(source)
+    assert set(plain["datasets"][0]) == {"name", "class"}
+
+    detailed = local_cpt.inspect_template(source, include_sql=True)
+    ds = detailed["datasets"][0]
+    assert ds["sql"] == "select * from demo_db.demo_shop"
+    assert ds["connection"] == "demo_conn"
+    embedded = detailed["datasets"][1]
+    assert embedded["sql"] is None and embedded["connection"] is None
+
+    # CLI 层也覆盖：--sql 才带 sql 键，不加时输出结构不变
+    via_cli = CliRunner().invoke(
+        report_cmd.report_group, ["local-inspect", str(source), "--sql"])
+    assert via_cli.exit_code == 0, via_cli.output
+    cli_ds = json.loads(via_cli.output)["datasets"][0]
+    assert cli_ds["sql"] == "select * from demo_db.demo_shop"
+    assert cli_ds["connection"] == "demo_conn"
+
+
+def test_local_inspect_sql_connection_fallbacks_and_empty(tmp_path):
+    """直接 <Connection> 文本可回退；空白连接归一 None；实体转义保真。"""
+    text = ('<?xml version="1.0" encoding="UTF-8"?><WorkBook><TableDataMap>'
+            '<TableData name="direct" class="com.fr.data.impl.DBTableData">'
+            '<Connection>demo_conn_direct</Connection>'
+            '<Query><![CDATA[select a & b < c]]></Query></TableData>'
+            '<TableData name="blank" class="com.fr.data.impl.DBTableData">'
+            '<Connection class="com.fr.data.impl.Connection"><DatabaseName>   </DatabaseName>'
+            '</Connection></TableData>'
+            '</TableDataMap>'
+            '<Report class="com.fr.report.worksheet.WorkSheet" name="sheet1">'
+            '<CellElementList><C c="0" r="0"><O>x</O></C></CellElementList></Report></WorkBook>')
+    source = tmp_path / "fallback.cpt"
+    source.write_text(text, encoding="utf-8")
+    datasets = local_cpt.inspect_template(source, include_sql=True)["datasets"]
+    assert datasets[0]["connection"] == "demo_conn_direct"
+    assert datasets[0]["sql"] == "select a & b < c"
+    assert datasets[1]["connection"] is None
+    assert datasets[1]["sql"] is None
+
+
 def test_local_commands_expand_tilde_paths(tmp_path, monkeypatch):
     """回归：Click 不展开 ~，Path 不能带 exists=True，否则 "~/..." 直接 exit 2。"""
     home = tmp_path / "home"

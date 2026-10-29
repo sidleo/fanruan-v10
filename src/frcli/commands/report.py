@@ -110,13 +110,15 @@ def local_profile_cmd(directory, keyword, contains, tag, limit):
 @click.option("--cells", is_flag=True, help="同时列出单元格、数据设置与扩展方向")
 @click.option("--design", is_flag=True,
               help="输出整份模板的报表原型、版面、视觉、交互与图表画像")
+@click.option("--sql", "include_sql", is_flag=True,
+              help="随数据集输出 SQL/连接名（本地解析，不触发服务端校验；大模板比线上 datasets 快）")
 @click.option("-n", "--limit", type=click.IntRange(1, 1000), default=100,
               show_default=True, help="--cells 最多返回多少格；cell_count 为选定范围的总数")
-def local_inspect_cmd(file, sheet, block, cells, design, limit):
+def local_inspect_cmd(file, sheet, block, cells, design, include_sql, limit):
     """只读检查本地 CPT，聚合报表按区块显示独立坐标。"""
     try:
         output_data(local_cpt.inspect_template(
-            _expand_user_path(file), sheet, block, cells, limit, design))
+            _expand_user_path(file), sheet, block, cells, limit, design, include_sql))
     except Exception as e:
         error(e)
 
@@ -527,6 +529,13 @@ def report_datasets(report_path, fmt, sql, instance):
                             console.print(f"\n[bold cyan]数据集 {i}: {ds['name']}[/]")
                             console.print(Panel(ds["sql"], title="SQL", border_style="blue"))
     except Exception as e:
+        text = str(e)
+        if "timed out" in text.lower() or "超时" in text:
+            click.echo(
+                "提示：大模板的 `report datasets` 由服务端全量解析，可能分钟级甚至超时。"
+                "可先 `frcli report download <模板> -o x.cpt` 拿模板原始字节，再 "
+                "`frcli report local-inspect x.cpt --sql` 离线看数据集 SQL（不触发服务端校验）。",
+                err=True)
         _platform_read_error_hint(e)
         error(e)
 

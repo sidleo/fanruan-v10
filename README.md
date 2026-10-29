@@ -1,263 +1,206 @@
 # fanruan_v10
 
-FineReport V10（帆软决策平台）CLI 工具 **`frcli`** 与其 agent skill **`fanruan-v10`** 的同一份源码仓库 —— skill 与 CLI 同源，`src/frcli/` 是唯一源码，不存在副本同步问题（结构仿 `yh-bigdata`）。
+`fanruan_v10` 提供与 FineReport V10 决策平台交互的命令行工具 **`frcli`**，以及供 Agent 使用的 **`fanruan-v10` skill**。它把报表查找、参数与 SQL 读取、导出、模板创作、运行时巡检和调度管理封装成命令，输出 JSON、表格或本地文件。
 
-- **Skill 名**：`fanruan-v10`（入口 `SKILL.md`；**必须小写字母/数字/连字符**，带下划线会被宿主静默丢弃）
-- **命令**：`frcli`
-- **源码**：`src/frcli/`
-- **版本**：0.10.24（支持离线检索、批量设计画像与单模板设计检查；可从本地 Demo 提炼报表选型、版面、视觉、交互和图表手法）
+CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 skill 入口。目录名保留 `fanruan_v10`，skill 名使用 `fanruan-v10`；协作与修改要求见 [AGENTS.md](AGENTS.md)。
 
-## 安装 / 自举
+## 能力与命令入口
+
+当前源码注册了 10 个命令组。下表列出主要入口，完整参数以 `frcli <命令组> --help` 和子命令 `--help` 为准。
+
+| 命令组 | 主要用途与入口 |
+| --- | --- |
+| `server` | 本地多实例配置：`list`、`add`、`remove`、`set-default`、`test`。 |
+| `report` | 查询模板、参数、数据集和 SQL；`preview` 数据集预览、`download` 原始模板、`upload/delete`、工作表与单元格编辑、表格/交叉表/图表/控件创作；`local-*` 离线示例分析。 |
+| `export` | 导出 `pdf`、`excel`、`word`、`image`、`csv`，或按清单 `batch` 导出。 |
+| `attach` | `upload/remove` 管理服务器附件缓存。 |
+| `system` | 查询 `version`、`health`、`modules`、`authority`、`login-policy`。 |
+| `inspect` | `status` 查询性能分析插件，`run` 计算模板并取得环节与单元格耗时。 |
+| `entry` | 查询平台条目与消息：`list`、`roots`、`all`、`messages`。 |
+| `user` | 查询当前用户、用户列表、部门和岗位。 |
+| `schedule` | 任务清单、配置、执行记录与日志，以及创建、更新、暂停、恢复、执行和删除。 |
+| `rpc` | 高级远程设计入口：`services`、`methods`、受只读白名单与写范围控制的 `call`。 |
+
+服务端命令需要实例配置和对应权限；模板下载、编辑与数据集预览使用远程设计通道，另需远程设计权限。`report local-examples/local-profile/local-inspect` 和 `rpc services --local`、`rpc methods` 可离线运行。
+
+## 安装与首次运行
+
+需要 **Python 3.10+**。运行依赖由 [pyproject.toml](pyproject.toml) 声明：`click>=8.0`、`httpx>=0.25`、`pyyaml>=6.0`、`rich>=13.0`。
+
+以下命令从项目根目录执行，示例采用 macOS/Linux shell：
 
 ```bash
-pip install -e .                 # 开发安装（src 布局）
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
 frcli --version
-
-# 或零安装直跑（未装/不在 PATH 时）
-cd src && python -m frcli --version
-python references/run.py --version        # 跨平台启动器
+frcli --help
 ```
 
-完整自举手册见 `references/install.md`。
+`--version` 应显示当前源码版本，`--help` 应列出上表命令组，均不需要连接服务器。Windows 可用 `.venv\Scripts\Activate.ps1` 激活环境。
 
-## 离线检索并学习 CPT 示例
+已有运行依赖时，也可不安装本项目，直接运行仓库源码：
 
-示例目录由使用者指定，无需连接或配置帆软实例：
+```bash
+PYTHONPATH=src python -m frcli --version
+PYTHONPATH=src python -m frcli --help
+```
+
+跨平台启动入口是 `python references/run.py <命令>`；Unix 便捷入口是 `references/run.sh <命令>`。启动器会寻找可用解释器，并可尝试创建或修复用户 PATH 中的命令软链。安装、自举与启动排查见 [安装手册](references/install.md)。
+
+## 配置实例并读取报表
+
+下面的服务器、账号、模板、数据集和日期参数均为示意，按目标实例替换。连接前需已有可用账号与访问权限。
+
+```bash
+# 在项目根目录、激活的 Python 环境中执行；配置保存在本机
+frcli server add demo --url https://reports.example.com \
+    -u demo_user -p '<密码>' --workspace /webroot --set-default
+frcli server test demo
+
+# 使用具体目录查找模板，再采用返回的 path
+frcli -i demo report list "demo_group/demo_user" -f table
+
+# 模板路径为相对路径，带 .cpt，不加前导 / 或 //doc//
+sample_report="demo_group/demo_user/sales_daily.cpt"
+FRCLI_TIMEOUT=300 frcli -i demo report paras "$sample_report"
+FRCLI_TIMEOUT=300 frcli -i demo report datasets "$sample_report" --sql -f table
+FRCLI_TIMEOUT=300 frcli -i demo report preview "$sample_report" \
+    --dataset ds1 --params '{"edate":"20260131"}' --rows 20 -f table
+```
+
+`server test` 会真实请求平台并返回认证结果。`paras` 用来确认驱动参数与派生参数，`datasets --sql` 读取完整 SQL，`preview` 会执行数据集查询。仅传模板需要的驱动参数，其他参数由模板推导。
+
+配置密码以明文保存在本机，调用时通过 `-p` 明确提供；不要将真实凭据写入仓库。报表列表按权限过滤，优先查询具体目录；`report list /` 会拉取全树。`report authed` 读取模板认证配置，用于枚举可见模板的入口是 `report list`。
+
+## 离线检索与学习 CPT 示例
+
+本地示例目录由使用者提供，无需实例配置：
 
 ```bash
 frcli report local-examples "<reportlets目录>" --keyword 分栏
 frcli report local-examples "<reportlets目录>" --contains PolyWorkSheet
-frcli report local-profile "<reportlets目录>" --tag dashboard -n 10
-frcli report local-profile "<reportlets目录>" --keyword 销售 --tag crosstab -n 10
-frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --design
-frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --cells
-frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --block 2 --cells
+frcli report local-profile "<reportlets目录>" --tag crosstab -n 10
+frcli report local-inspect "<reportlets目录>/demo.cpt" --design --cells
+frcli report local-inspect "<reportlets目录>/demo.cpt" --block 2 --cells
+frcli report local-inspect "<reportlets目录>/demo.cpt" --sql          # 数据集 SQL/连接名（离线）
 ```
 
-`local-profile` 会统计报表原型、设计技术、图表类型，输出整库 `design_lessons` 并排序代表样例；
-`--design` 输出版面、数据、视觉、交互与图表画像，`--cells` 可继续定位到具体格号。按标签检索时，
-先要求目标结构足够完整，再优先规模小、附带控件/脚本/多 sheet 较少、容易逐格复盘的样板；
-目标信号达到学习所需数量后不再无限加权。检索结果会标明 `score_semantics`、总数、截断和跳过情况，
-检查结果区分工作表、聚合块及各块内坐标。
+`local-profile` 汇总原型、技术、图表类型和代表样例，`local-inspect --design` 提供版面与交互画像，`--cells` 显示具体格号，`--sql` 离线解析数据集 SQL 与连接名（大模板比线上 `report datasets` 快）。聚合报表 `PolyWorkSheet` 的各个块拥有独立坐标；普通网格编辑不能直接用于这些聚合块。
 
-本地结构分析不代表渲染或导出效果已验证。检索与聚合块细节见 `references/cpt-local-examples.md`；
-从 Demo 选择报表原型、提炼视觉与交互规则、实施和验收的完整方法见
-`references/cpt-design-from-examples.md`。
+结构分析需要结合实际渲染和导出验收。操作细节见 [本地示例检查](references/cpt-local-examples.md)，选型与设计方法见 [从示例提炼设计](references/cpt-design-from-examples.md)。
 
-## 快速开始
+## 导出与模板创作
+
+单次导出示例沿用上面的 `sample_report`，输出在项目根目录的 `out/`：
 
 ```bash
-# 1. 配置实例（密码明文落在 ~/.frcli/config.yaml；agent 必须带 -p，否则交互式提示会卡住）
-frcli server add yh --url https://<服务器> -u <工号> -p '<密码>' --set-default
-frcli server test
-
-# 2. 找报表（目录要具体；`/` 会拉全量，数千条，随时间增长）
-frcli report list "demo_group/demo_user/dept_a/dept_b" -f table
-
-# 3. 看参数与取数口径
-frcli report paras "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt"   # 官方参数接口（含派生参数公式）
-frcli report datasets "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --sql -f table
-frcli report preview "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --dataset ds1 --params '{"edate":"20260228"}' --rows 20 -f table
-
-# 4. 导出（只传驱动参数；复杂报表务必调大超时）
-FRCLI_TIMEOUT=300 frcli export excel "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" \
-    -o /tmp/sales_daily_20260731.xlsx --params '{"edate":"20260731","extype":"simple"}'
-
-# 5. 校验产物（必做：导出「成功」也可能是 HTML 出错页面）
-python3 -c "print('OK' if open('/tmp/sales_daily_20260731.xlsx','rb').read(4)==b'PK\x03\x04' else '坏文件')"
-
-# 6. 批量导出
-#   manifest.yaml:
-#     reports:
-#       - path: demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
-#         format: excel
-#         output: ./out/sales_daily_20260731.xlsx
-#         params: {edate: "20260731", extype: simple}
-FRCLI_TIMEOUT=600 frcli export batch manifest.yaml
-
-# 7. 定时任务（读）
-frcli schedule list -f table
-frcli schedule get "demo_user_销售_示例概览by月_飞书"        # 拿 UUID id
-frcli schedule history "demo_user_销售_示例概览by月_飞书" -n 5      # 升序返回，最后一条才是最新；返回 id 即 logId
-frcli schedule record "demo_task_超时明细" -n 20                  # 执行记录 + 结果（分页，带 total）
-frcli schedule record "demo_task_超时明细" --all -n 20             # 执行记录（翻全量，按 time 倒序）
-frcli schedule pause  "demo_任务名"                                # 暂停任务（只切状态，不删任务）
-frcli schedule update "demo_任务名" --template "demo_group/…/新模板.cpt"   # 改任务模板（精确名；校验路径存在；保留暂停态）
-frcli schedule resume "demo_任务名"                                # 恢复任务运行
-frcli schedule log "demo_task_超时明细_same_fire_1000000000000"   # 日志节点树，定位哪一步失败
-#   ⚠️ log 的参数是 history 返回的 id（<任务名>_same_fire_<ts>）；record/records 的 uuid/id 是执行记录 id，不能用
-
-# 7.1 定时任务（写，🔴 先确认）：create / update / delete <UUID> / run <任务名>
-#   新建任务：用 schedule get 派生 YAML（去掉只读字段 + 换 taskName/baseName + 重置 scheduleOutput.id
-#   与 outputActionList 的 id/outputId，建议带上 creator），再 frcli schedule create new.yaml
-#   —— 细节与「detached entity」坑见 SKILL.md §6.11
-#   delete 的参数是 UUID（不是任务名）；body 为裸数组，0.4.2 起返回值会被校验
-
-# 7.2 改服务端模板内容（🔴 生产写，先确认影响范围）
-#   平台 REST 没有写模板内容的接口；frcli 走 Designer 的「远程设计」通道（见 SKILL.md §6.7）
-frcli report ws-list "demo_group/demo_user"                    # 看服务端真实目录（只读）
-frcli report download "demo_group/demo_user/临时/a.cpt" -o a.cpt   # 取回模板原始字节（与服务器逐字节相同）
-#   ……本地改 a.cpt……
-frcli report upload a.cpt "demo_group/demo_user/临时/a.cpt" --force
-#   写前自动占锁（别人 Designer 开着则拒绝）+ 备份原文件到 ~/.frcli/backups/ + 回读 SHA256 校验
-frcli report delete "demo_group/demo_user/临时/a.cpt" --force      # 移入回收站，可恢复
-
-# 7.3) 写范围：0.6.0 起**默认拒绝** —— 没设范围就必须显式 --any-path
-export FRCLI_WRITE_SCOPE="demo_group/demo_user/临时"   # 推荐：限定范围
-#   之后 report upload / delete / edit --apply 越界（含 ../ 穿越、兄弟目录）一律拒绝
-#   单次放行：frcli report upload a.cpt "别的目录/a.cpt" --force --any-path
-
-# 7.4) 从零创作模板（0.8.0 起）：new / cell / dataset / param / style / table
-#      + crosstab（交叉表/动态列） / highlight（条件属性） / page（分页设置）
-#   全部默认 dry-run（打印可读 diff + bytes_before/after），加 --apply 才写；
-#   语法与配方见 references/cpt-authoring.md；**8 类复杂报表配方见 references/cpt-patterns.md**
-#   （分组小计/交叉表/条件属性/多数据集/参数联动/日期维度/分页/公式实战，每条都有逐格实测证据）
-R="demo_group/demo_user/临时/demo.cpt"
-frcli report new "$R" --apply                       # 空白模板（自带可渲染骨架）
-frcli report dataset "$R" --add ds1 --conn demo_conn \
-    --sql "select 'A' code,1 cnt union all select 'B',2" --param topn=10 --apply
-frcli report table "$R" --dataset ds1 --at A2 --columns code,cnt --header --apply
-#   数据设置（<RG>）默认 list（记录原样展开）；不写 <RG> 服务端按「分组」去重、会静默改数
-frcli report table "$R" --dataset ds1 --at A4 --columns 地区,销售员,销量 \
-    --mode summary --group-by 地区,销售员 --fn sum --header --apply
-frcli report table "$R" --sheet 明细表 --dataset ds1 --at A2 --columns code,cnt --apply
-#   多 sheet 模板用 --sheet 选写入目标（缺省第一张；cell/highlight/table/crosstab/page/chart/link 都吃它）
-frcli report cell "$R" --at D3 --set-ds-mode list --apply
-frcli report cell "$R" --at A1 --set-formula '="TOP" + $topn' --merge A1:C1 --apply
-frcli report cell "$R" --list -f table              # 只读：A1/值/公式/绑定/ds_mode/扩展/样式
-frcli report style "$R" --add --num-format "#,##0" --bold --border --apply
-frcli report param "$R" --add topn=10 --apply       # 模板参数（公式里的 $x 靠它给默认值）
-
-# 7.4.1) 三类复杂效果（各自一条命令）
-frcli report chart "$R" --at A1 --dataset ds1 --type column --category 地区 --series 产品 \
-    --value 销量 --fn sum --title "销量对比" --show-title --apply   # 图表（导出 xlsx 是嵌入图片）
-frcli report widget "$R" --param 地区 --type combo --options 华东,华南 --default 华东 --apply
-frcli report link "$R" --at A3 --to "别的报表.cpt" --param center='=$A3' --apply  # 钻取（预览态）
-frcli report crosstab "$R" --dataset ds1 --at A3 --row 地区 --col 产品 --value 销量 \
-    --agg sum --total-row --total-col --apply       # 交叉表：列数随数据自动增长
-frcli report highlight "$R" --at C3 --rule 'v>1000:bg=#FFC7CE,fg=#9C0006,bold' \
-    --rule 'ROW()%2=0:bg=#F2F2F2' --apply           # 条件属性（规则按顺序生效，后覆盖前）
-frcli report highlight "$R" --at C3 --list          # 只读回看规则
-frcli report page "$R" --freeze 1,0 --header-height 30 --apply
-frcli report cell "$R" --at A3 --bind ds1.d --ds-result "FORMAT(TODATE(\$\$\$,'yyyyMMdd'),'yyyy年MM月')" --apply
-frcli report cell "$R" --at A4 --set-formula "=SUM(C3)" --expand-left A3 --apply   # 组内小计挂父格
-#   验收必须逐格读回（写错列名/公式/样式索引，服务端照样导出"成功"）
-
-# 8. 附件（服务器附件缓存，非报表目录）
-frcli attach upload /tmp/说明.docx --name 说明.docx   # → 返回 attach_id
-frcli attach remove default1789441975426_Olw7l        # 用完清理
+FRCLI_TIMEOUT=300 frcli -i demo export excel "$sample_report" \
+    -o out/sales_daily_20260131.xlsx \
+    --params '{"edate":"20260131","extype":"simple"}'
 ```
 
-## 运行时巡检（模板性能分析）
+CLI 内置文件魔数、HTML 出错页和排队页校验；失败会给出平台原因，已落盘的坏产物会保留为 `.bad`。Word 导出的实际格式为 **RTF**，默认扩展名 `.rtf`。格式通过后，仍需核对数据日期、参数和关键单元格；`extype=simple` 可处理部分分页问题，不能解除平台内存保护。
 
-> 结果解读：`cell` 的耗时**包含等待数据集取数**（触发取数那格 ≈ `extra.db fetch`）；取数 vs 渲染怎么拆、性能排查顺序见 SKILL §6.22/§6.23。
-
-```bash
-frcli inspect status                     # 插件状态：检测点是否生效（只读）
-# 真实执行一次模板，输出整体/环节/单元格耗时；等待由 CLI 内部完成（退避轮询），不用自己 sleep
-FRCLI_TIMEOUT=300 frcli inspect run "demo_group/demo_user/dept_a/dept_b/sales_daily.cpt" --op page
-FRCLI_TIMEOUT=300 frcli inspect run "…/sales_daily.cpt" --op view --params '{"edate":"20260131"}'
-```
-
-`run` 默认输出会剔除 `meta.para`（工号/组织/会话参数），`--raw` 才原样输出；`op` 只允许 `page` / `view`（`write` 是填报写操作）。
-
-## 命令组概览
-
-| 命令组 | 用途 | 主要命令 |
-|--------|------|----------|
-| `server` | 多实例配置 | `list` / `add` / `remove` / `set-default` / `test` |
-| `report` | 报表模板 | `local-examples` / `local-profile` / `local-inspect --design/--cells`（本地只读）/ `list` / `info` / `paras` / `datasets` / `download` / `serverdatasets` / `columns` / `authed`（模板认证配置路由，非权限树，见下）/ `upload`🔴 / `delete`🔴 / `ws-list` / `fonts` / `versions` / `image` / `edit` / **创作**：`new` / `cell` / `dataset` / `param` / `style` / `table` / `crosstab` / `highlight` / `page` / `chart` / `widget` / `link` |
-| `export` | 报表导出 | `pdf` / `excel` / `word` / `image` / `csv` / `batch` |
-| `attach` | 服务器附件 | `upload` / `remove`（附件缓存，不动报表目录） |
-| `system` | 系统与平台信息 | `version` / `health` / `modules` / `authority` / `login-policy` |
-| `inspect` | 运行时巡检（模板性能分析，真实执行一次模板） | `status` / `run`（`--op page\|view`，内部等待结果） |
-| `entry` | 平台条目与消息 | `list` / `roots` / `all` / `messages` |
-| `user` | 用户与组织 | `list` / `me` / `departments` / `posts` |
-| `schedule` | 定时任务 | `list` / `tasks` / `get` / `exists` / `executing` / `create` / `update` / `delete` / `run` / `history` / `record` / `records` / `log` / `setting` |
-
-> ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
-> （`/decision/v10/report/templates/all/authentication`），实测**恒返回 `[]`**（HTTP 200 的原始响应即 `{"data":[]}`），
-> 与账号有没有权限无关。枚举有权限的模板树用 `report list`（平台已按权限过滤）；空结果的提示打在 **stderr**，stdout 仍是合法 JSON。
-
-完整命令树、参数语义与安全分级见 **`SKILL.md`**；`frcli <命令组> --help` 是最终事实来源。
-
-全局选项：`-i/--instance NAME` 指定实例，`-v/--verbose`，`--version`。多数查询命令支持 `-f json|table`（默认 json）。
-
-## 输出与退出码
-
-CLI 输出为 JSON（`-f table` 为表格），便于 agent 解析：
-
-```json
-{"status": "ok", "action": "export", "format": "excel", "report": "...", "file": "/path/to/report.xlsx", "net_retries": 0}
-```
-
-`net_retries` 是连接层错误自动重发的次数（只对幂等 GET 生效，正常为 0）。
-`export batch` 的 `results`/`errors` 每条带本次 `params` 与已展开的 `output`；`total` 是**展开后**的任务数（manifest 条数见 `manifest_reports`）。
-`export batch` 另有顶层 `warnings` 数组（正常为 `[]`）：多条任务展开出同一个 `output` 路径时提示会互相覆盖（多半是 `output` 漏了 `{参数名}` 占位）。
-参数矩阵的 `params` 给了**空列表**时，`export batch` 直接报 `EXPORT_ERROR` 并点名是哪个参数（exit 1），不会静默跳过该报表。
-
-错误输出到 stderr：`{"status": "error", "error": {"code": "AUTH_FAILED", "message": "..."}}`
-
-退出码：`0` 成功、`1` 业务错误、`2` 配置错误、`3` 连接错误。
-
-## 配置与认证
-
-- 配置搜索顺序：`$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml`
-- token 缓存：`~/.frcli/tokens/<实例>.json`（默认 24h；认证失效——401/403 **或 302→CAS 登录页**——自动清缓存重登一次）
-- 环境变量：`FRCLI_TIMEOUT`（秒，默认 30；覆盖 REST 导出与 `report info/datasets/paras` 等读模板命令）、`FRCLI_RD_TIMEOUT`（秒，默认 300；覆盖走远程设计通道的命令：`report download`、`report image`、改模板类 `upload/delete/new/cell/...`；`FRCLI_TIMEOUT` 对它无效）、`FRCLI_INSPECT_TIMEOUT`（秒，默认 60；`inspect run` 等待巡检结果上限，模板计算本身仍受 `FRCLI_TIMEOUT` 约束）、`FRCLI_AUTH_LOCK_TIMEOUT`（秒，默认 30；并发进程等待同一实例登录锁的上限）、`FRCLI_CA_CERT`（CA 证书路径）、`FRCLI_CONFIG`
+批量导出会真实触发多次计算，执行前需确认规模。清单为 YAML，示意如下：
 
 ```yaml
-default: yh
-instances:
-  yh:
-    url: "https://<服务器>"
-    username: "00000000"
-    password: "xxx"          # 明文存储
-    workspace: "/webroot"
+reports:
+  - path: demo_group/demo_user/sales_daily.cpt
+    format: excel
+    output: ./out/sales_daily_{edate}.xlsx
+    params:
+      edate: ["20260130", "20260131"]
+      extype: simple
 ```
 
-## 目录结构
+保存为 `manifest.yaml` 后执行 `FRCLI_TIMEOUT=600 frcli -i demo export batch manifest.yaml`。列表参数展开为参数矩阵；输出名应覆盖所有变化参数，避免覆盖文件。检查结果中的 `failed`、`errors` 与 `warnings`，批量顶层 `status: ok` 表示流程结束，可能仍有失败条目。
 
+模板创作支持 `new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link/sheet` 等入口，多数修改命令默认 dry-run，确认差异并获得目标授权后加 `--apply` 才写。已有模板的编辑预览仍可能读取服务器。
+
+写入前设置 `FRCLI_WRITE_SCOPE="demo_group/demo_user/sandbox"` 限定授权目录；未设范围默认拒绝写入。`--any-path` 显式放行单次目标，仍需取得操作授权。覆盖或删除已有模板前先下载备份；写入包含占锁、覆盖备份和回读校验。模板删除移入服务端回收站，目录删除另需 `--recursive`。
+
+模板创作配方与验收要求见 [创作手册](references/cpt-authoring.md)、[配方一](references/cpt-patterns.md) 和 [配方二](references/cpt-patterns2.md)。动态参数默认值、复杂填报控件等场景仍需结合 XML 或 Designer；列名绑定和公式必须按实际渲染结果验证。
+
+## 调度与性能排查
+
+查询任务与最近执行记录：
+
+```bash
+frcli -i demo schedule list -f table
+frcli -i demo schedule get "demo_task"
+frcli -i demo schedule record "demo_task" -n 20
+frcli -i demo schedule history "demo_task" -n 20
+frcli -i demo schedule log "demo_task_same_fire_1000000000000"
 ```
+
+`history` 按时间升序，`record` 按时间倒序；`log` 必须使用 `history` 返回的 id。`get` 支持任务名或 UUID，名称查询可能模糊匹配；变更命令要求精确任务名，`delete` 使用任务 UUID。`tasks --all` 对应本人创建的任务，全平台任务名用 `schedule list`。
+
+创建、更新、暂停、恢复、删除和立即执行均影响生产调度，操作前确认影响范围并备份 `schedule get`。换模板按「备份 → pause → update --template → 验证导出 → 恢复预期状态」执行；`update` 保留原暂停状态与创建人，非 0/1 状态会拒绝自动修改。新建载荷与输出 UUID 处理见 [SKILL.md](SKILL.md) §6.11、§6.26。
+
+```bash
+frcli -i demo inspect status
+FRCLI_TIMEOUT=300 frcli -i demo inspect run "$sample_report" --op page
+```
+
+`inspect run` 需要平台性能分析插件，会真实计算模板并在内部等待结果，无需自行 sleep；仅开放 `page/view`。默认剔除 `meta.para`，`--raw` 结果可能含敏感会话参数。单元格耗时包含等待数据集的时间，先结合 `db_fetch` 判断取数与渲染；性能测试前关闭缓存。插件中的 SQL 可能截断至 500 字符，核对完整 SQL 使用 `report datasets --sql`。
+
+## 配置与输出约定
+
+配置按 `$FRCLI_CONFIG` → `~/.frcli/config.yaml` → `./.frcli.yaml` 搜索；`server add/remove/set-default` 写入 `~/.frcli/config.yaml`。token 缓存在 `~/.frcli/tokens/<实例>.json`，覆盖模板的备份放在 `~/.frcli/backups/`。
+
+指定实例优先级为子命令 `-i` → 顶层 `-i` → `FRCLI_INSTANCE` → 配置默认实例 → 首个实例。环境变量均为可选项：
+
+| 变量 | 默认值与用途 |
+| --- | --- |
+| `FRCLI_CONFIG` | 未设；覆盖配置文件的优先读取路径。 |
+| `FRCLI_INSTANCE` | 未设；显式选项之外的实例选择。 |
+| `FRCLI_TIMEOUT` | `30` 秒；REST 请求与导出、模板定义读取的超时。 |
+| `FRCLI_RD_TIMEOUT` | `300` 秒；远程设计请求超时，覆盖原始模板下载、编辑、出图和数据集预览的相应 RPC 请求。 |
+| `FRCLI_INSPECT_TIMEOUT` | `60` 秒；等待巡检结果上限，模板计算仍受 `FRCLI_TIMEOUT` 约束。 |
+| `FRCLI_AUTH_LOCK_TIMEOUT` | `30` 秒；并发进程等待同实例登录锁的上限。 |
+| `FRCLI_WRITE_SCOPE` | 未设即拒绝模板写入；显式限定授权目录。 |
+| `FRCLI_WAIT_LOCK` | `0` 秒额外等待；在基础锁重试之后延长等待窗口。 |
+| `FRCLI_CA_CERT` | 未设；加载指定 CA 文件。当前 SSL 实现关闭证书与主机名验证，该变量不会开启严格校验。 |
+
+查询默认输出 JSON，多数查询支持 `-f table`；操作结果带 `status`，错误 JSON 输出到 stderr。CLI 业务错误通常返回 `1`，配置错误为 `2`，连接错误为 `3`，Click 参数错误也可返回 `2`。模板无改动返回成功并带 `changed: false`；批量是否全部成功须检查 `failed`。
+
+认证使用 token 与登录 cookies，遇认证失败会尝试清缓存重登一次；并发登录由实例级锁保护。超时按所属通道调整变量；连接 reset 可原样重试；本机代理故障检查代理或 VPN，CLI 不自动绕过代理；502/503/504 先检查平台健康并降低并发。具体判据见 [SKILL.md](SKILL.md) 的关键坑点与故障排查。
+
+## 项目结构与开发
+
+```text
 fanruan_v10/
-├── SKILL.md              # agent 入口：命令树 / 安全分级 / 实测坑点 / 故障排查
-├── README.md             # 本文件（人类可读）
-├── AGENTS.md             # 开发规范（CLAUDE.md / CODEBUDDY.md 为软链）
-├── pyproject.toml        # 打包定义（src 布局）
-├── src/frcli/            # CLI 唯一源码
-├── references/
-│   ├── install.md        # 自检 + 自举手册
-│   ├── cpt-authoring.md  # 模板创作手册（命令 + XML 语法 + 配方 + 坑点）
-│   ├── cpt-patterns.md   # 第一辑：8 类复杂报表配方（分组小计/交叉表/条件属性/多数据集/参数/日期/公式）
-│   ├── cpt-patterns2.md  # 第二辑：图表/参数控件/钻取超链接/层次坐标/分页（含"写错的对照"与验收通道矩阵）
-│   ├── cpt-features.md   # cpt 语料普查（1602 个官方模板频次 + 片段 + 默认值 + 对照表）
-│   ├── cpt-xml.md        # cpt 结构速查（定点字节读写）
-│   ├── cpt-local-examples.md      # 本地示例查找/画像与聚合报表区块检查
-│   ├── cpt-design-from-examples.md # 从本地示例提炼设计画像、选型矩阵与验收规则
-│   ├── remotedesign.md   # 远程设计 RPC 协议（写模板的底层）+ 复核手册
-│   ├── run.py            # 跨平台启动器（自举 + 软链自愈 + 版本提示）
-│   ├── run.sh            # Unix 便捷入口
-│   └── frcli             # 软链 shim（PATH 中的 frcli 指向它）
-└── tests/                # pytest
+├── SKILL.md                 # skill 入口、命令树、安全分级和排障
+├── AGENTS.md                # 协作规则；CLAUDE.md / CODEBUDDY.md 软链接到它
+├── README.md                # 项目说明
+├── pyproject.toml           # 依赖、版本、src 布局与 frcli 入口
+├── src/frcli/
+│   ├── cli.py               # Click 命令注册
+│   ├── commands/            # 各命令组
+│   ├── client.py            # REST、导出与运行时巡检
+│   ├── auth.py / config.py  # 登录、缓存与多实例配置
+│   ├── neterr.py            # 共用网络错误分类
+│   ├── remotedesign.py      # 远程设计通道与模板读写保护
+│   ├── reportops.py         # 模板修改编排
+│   ├── cptxml.py / chartxml.py / local_cpt.py
+│   └── dataset_preview.py / rpc.py / jser.py / rdcrypto.py
+├── references/              # 安装、启动器、XML、创作配方与协议手册
+├── docs/                    # 内容落点、发布脱敏、探索与验证证据、巡检台账
+├── tests/                   # pytest 回归测试
+└── tools/                   # 打包、会话扫描和文档配方复现脚本
 ```
 
-## 已知限制
+开发验证在根目录运行，测试环境另需 pytest：
 
-- 聚合报表 `PolyWorkSheet` 由多个独立区块构成；`report local-inspect` 可只读检查区块，普通 `report cell/table` 等网格操作不能直接编辑它。
-- 0.8.0 起可**从零创作**模板（`report new/cell/dataset/param/style/table` +
-  `crosstab` 交叉表 / `highlight` 条件属性 / `page` 分页设置，见 `references/cpt-authoring.md`
-  与 `references/cpt-patterns.md`）；0.5.0 起 `report upload` / `report delete` 走远程设计通道。仍有的限制：
-  - 单元格支持值/公式/数据集列/合并/样式/扩展/条件属性/`<Result>` 表达式/HTML 渲染；
-    图表、填报控件、页眉页脚**内容**仍需 Designer（`report page` 只读写高度与冻结列）
-  - 「每页重复标题行」= 报表级 `<ReportPageAttr><HR F="起" T="止"/></ReportPageAttr>`
-    （`report page --repeat-header-rows 1:1`；实测加高表头后 PDF 3 页 → 7 页）；
-    页眉页脚页码用 `report page --footer-text '"第 " + $$page_number + " 页"' --footer-formula`
-  - 组内排名 `RANK()` 在本安装求值失败（渲染 `#NAME?`）→ 排名写在 SQL 里；
-    `ACCSUM`/`COUNTD`/`DATEFORMAT` 等函数名不存在（写了整张模板渲染不出来）
-  - 列名无法离线核对（要连库才知道）：写错不报错、只会渲染出空列，验收必须逐格读回
-  - 账号必须被授予「远程设计」权限且覆盖目标目录；无权限时服务端**静默跳过写入**，靠回读校验兜底
-  - 模板被其他 Designer 打开（占锁）时拒绝覆盖
-  - `delete` 是移入服务端回收站，不是物理删除
-- 无 `query` 命令（早期 README 遗留）：要看数据集 SQL 用 `report datasets`
-- 导出遇到报表侧错误（数据集 SQL 报错、缺参数）时返回 HTML 出错页面且 HTTP 200，CLI 仍报 `status: ok` —— 必须校验文件魔数
-- 认证失效不返回 401，而是 302 到 CAS 登录页；`schedule list` / `report list` 的 `[]` 优先怀疑认证（0.1.1 起自动重登并复验，仍失败才报 `AUTH_FAILED`）
+```bash
+PYTHONPATH=src python -m frcli report --help
+PYTHONPATH=src python -m pytest tests/ -q
+git diff --check
+```
+
+单项测试可指定 `tests/test_*.py`；部分安装包校验依赖 `FINEREPORT_HOME`，缺少时会跳过。`tools/doc_rerun.sh` 会真实写服务端模板并导出，须先阅读脚本、配置授权范围，不能作为默认无副作用检查。
+
+维护 DSH 会话问题可用 `python tools/scan_sessions.py --date YYYY-MM-DD`；需本机存在 DSH 会话及 `zstd`，不带日期默认扫描昨天。工具只收集线索，结论需复核，台账只保留脱敏信息。
+
+分发产物为 `dist/fanruan-v10.skill`，该文件在 `.gitignore` 中单独放行。打包前准备仓库外脱敏黑名单，执行 `tools/build_skill.sh --check` → `tools/build_skill.sh` → `tools/build_skill.sh --check`，确保新包也通过检查。详细门禁见 [发布与脱敏](docs/发布与脱敏.md)，信息归属见 [内容落点判定](docs/内容落点判定.md)。

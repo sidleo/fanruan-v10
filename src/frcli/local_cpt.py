@@ -770,8 +770,14 @@ def profile_examples(directory, keyword=None, contains=None, tag=None, limit=20)
 
 
 def inspect_template(path, sheet=None, block=None, include_cells=False, limit=100,
-                     include_design=False):
-    """检查一个本地 CPT；聚合报表的每个 Block 保留独立坐标。"""
+                     include_design=False, include_sql=False):
+    """检查一个本地 CPT；聚合报表的每个 Block 保留独立坐标。
+
+    `include_sql=True` 时给每个数据集附带 `<Query>` 里的 SQL（去掉首尾空白）与连接名
+    （`<Connection><DatabaseName>`，取不到回退 `<Connection>` 直接文本）。
+    线上 `report datasets --sql` 由服务端全量解析，大模板可能分钟级；先 `report download`
+    拿模板原始字节、再本地 `--sql` 是离线快路径（不触发服务端校验）。
+    """
     source = Path(path).expanduser().resolve()
     try:
         raw = source.read_bytes()
@@ -803,8 +809,20 @@ def inspect_template(path, sheet=None, block=None, include_cells=False, limit=10
             raise ApiError(f"sheet {info['name']!r} 没有第 {block} 个聚合块")
         blocks = [blocks[block - 1]]
 
-    datasets = [{"name": node.get("name", ""), "class": node.get("class", "")}
-                for node in parsed.findall("./TableDataMap/TableData")]
+    datasets = []
+    for node in parsed.findall("./TableDataMap/TableData"):
+        item = {"name": node.get("name", ""), "class": node.get("class", "")}
+        if include_sql:
+            query = node.find("Query")
+            sql = (query.text or "").strip() if query is not None else ""
+            item["sql"] = sql or None
+            # 真实 CPT 的连接名在 <Connection><DatabaseName>；直接 <Connection> 文本通常只有空白。
+            database = node.find("Connection/DatabaseName")
+            if database is None:
+                database = node.find("Connection")
+            name = (database.text or "").strip() if database is not None else ""
+            item["connection"] = name or None
+        datasets.append(item)
     result = {"file": str(source), "bytes": len(raw), "root": parsed.tag,
               "datasets": datasets, "sheets": [item[0] for item in descriptions],
               "selected_sheet": info["name"], "selected_block": block,

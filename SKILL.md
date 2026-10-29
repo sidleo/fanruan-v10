@@ -1,8 +1,8 @@
 ---
 name: fanruan-v10
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 9 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.10.24
+  version: 0.10.25
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -61,12 +61,11 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── remove NAME                          删实例并清其 token 缓存
 │   ├── set-default NAME
 │   └── test [NAME]                          连接 + 登录校验
-│
 ├── report                          报表模板（决策平台目录树）
 │   ├── local-examples DIRECTORY [--keyword K] [--contains TEXT] [-n 30]  离线查找本地 CPT
 │   ├── local-profile DIRECTORY [--keyword K] [--contains TEXT] [--tag T] [-n 20]
 │   │                                                                     批量画像：原型/技术/图表/代表样例
-│   ├── local-inspect FILE [--sheet S] [--block N] [--cells] [--design] [-n 100]
+│   ├── local-inspect FILE [--sheet S] [--block N] [--cells] [--design] [--sql] [-n 100]
 │   │                                                                     离线检查；聚合块独立坐标
 │   ├── list [DIRECTORY] [--keyword K] [--type cpt]   列目录；⚠️ 目录要具体，`/` = 全量（实测 3873 条）
 │   │                                              `--keyword/--type` 走**服务端筛选**，别拉全量再本地筛
@@ -134,23 +133,19 @@ frcli [--version] [-i INSTANCE] [-v]
 │    ⚠️ 上面 12 条创作命令**默认 dry-run**，`--apply` 才写；语法与配方见 references/cpt-authoring.md、
 │       **references/cpt-patterns.md**（第一辑 8 类）、**references/cpt-patterns2.md**（第二辑：
 │       图表/参数控件/钻取/层次坐标/分页，含"写错的对照"）
-│
 ├── export                          报表导出（真实触发服务端计算）
 │   ├── pdf|excel|word|image|csv REPORT [-o FILE] [--params JSON] [-i]
 │   │        缺省输出名派生自报表名：.pdf / .xlsx / .rtf(word 实际是 RTF) / .png / .csv
 │   └── batch MANIFEST.yaml [-i]             批量导出（YAML 清单，逐条汇总成败）
-│
 ├── attach                          服务器附件（落附件缓存，**不动报表目录**）
 │   ├── upload LOCAL [--name NAME]           上传本地文件 → 返回 attach_id
 │   └── remove ATTACH_ID                     删除附件（传完记得清理）
-│
 ├── system                          系统与平台信息（🟢 只读）
 │   ├── version [-f]                         服务端版本 + 各模块 jar 版本
 │   ├── health [-f]                          系统健康状态
 │   ├── modules [--keyword K]                决策平台模块树
 │   ├── authority                            权限开关（分级授权/报表编辑/调度…）
 │   └── login-policy                         登录配置 + 密码策略 + 密码到期提醒
-│
 ├── inspect                         运行时巡检/模板性能分析（插件 com.fr.plugin.ins）
 │   ├── status [-f]                         插件状态：检测点是否生效（🟢 只读）
 │   └── run REPORT [--op page|view] [--params JSON] [--timeout S] [--raw] [-f]
@@ -158,21 +153,18 @@ frcli [--version] [-i INSTANCE] [-v]
 │                                           调用方不用 sleep / 猜等待时间（见 §6.22）
 │                                           ⚠️ 会真实执行一次模板；op 只允许 page/view
 │                                           ⚠️ 默认剔除 meta.para（工号/组织）；--raw 才原样输出
-│
 ├── entry                           平台条目与消息（🟢 只读）
 │   │   ⚠️ 条目树 id 是 UUID，与 report 的报表目录树（id = 文件路径）是两套
 │   ├── list [--page P] [-n N] [--keyword K] 条目分页列表
 │   ├── roots [-f]                           条目根节点
 │   ├── all [-f]                             全量条目
 │   └── messages [--unread] [-n N]           平台消息（未读/全部）
-│
 ├── user                            用户与组织（🟢 只读）
 │   ├── list [-f]                            当前账号可见用户（工号+姓名，非全量目录）
 │   ├── me                                   当前登录账号信息（工号/姓名/角色）
 │   ├── departments [--keyword K]            部门树（本账号实测为空）
 │   └── posts [--keyword K]                  岗位列表（实测 39 条）
-│
-└── schedule                        定时任务（生产调度，写操作危险）
+├── schedule                        定时任务（生产调度，写操作危险）
     ├── list [-f]                            仅返回任务名
     ├── tasks [--page P] [-n N] [--all]      任务列表**含 taskId**（--all = listAll，只含**本人创建**任务；
     │                                         全部任务名用 `schedule list`；非 --all 时下一页会 stderr 提示 hasNext）
@@ -196,6 +188,10 @@ frcli [--version] [-i INSTANCE] [-v]
     │                                        ⚠️ TASK_LOG_ID 必须是 history 返回的 id（<任务名>_same_fire_<时间戳>），
     │                                           record/records 的 uuid/id 是执行记录 id，传错报「对象不存在」
     └── setting                              调度全局设置（消息开关/日志清理）
+└── rpc                             远程设计 RPC 网关（高级；🟢 只读白名单 / 🔴 写需 --yes）
+    ├── services [--local]                  服务类清单（--local 列本地白名单）
+    ├── methods CLASS [--local]             某服务类的方法签名
+    └── call CLASS METHOD --args JSON [--yes]   调用（默认只读白名单，写方法需确认 + 写范围）
 ```
 
 **报表路径写法**（本服务器的真实约定，实测）：
@@ -422,6 +418,10 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 
 `report datasets/info/download` 走 `format=cpt` 取模板定义，服务端会校验数据集。数据集配置错误时返回 0 条 / `无法读取报表定义` —— 这不是 CLI 故障，而是**这张报表当前就是坏的**（导出也必然拿到出错页面）。
 
+另一种常见形态：表还在但**列被重建/缺失**，报 `Could not resolve column/field reference: 'xxx'`，报文自带整段原始 SQL。
+数据集 SQL 引用了临时镜像/旧结构表时，先核对真实表列（`olap sql desc`），再改绑正式表；要批量找哪些模板引用了
+这张表，用平台元数据反查报表 SQL（内部表与查法见本地知识库），不要逐个 `report datasets` 试。
+
 ### 6.6 命令名与参数的真实语义
 
 - `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿），且请求体是**裸数组** `["<id>"]`。传错会报 `任务不存在` 或删不动。
@@ -431,6 +431,8 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
   ——查执行记录用 `schedule record`/`records`（2026-10 三个真实会话各踩一次，属参数猜错，命令签名见本文件命令树）。
 - `report list <目录>` 结果里会**包含该目录自身**一条（`is_directory: true`），属正常实现，过滤掉即可。
 - `report list /` 会返回**整个服务器**的文件树（数千条，随平台增长；实测 2026-10 约 3.9k），不要用 `/` 当"顶层"。
+- `-f/--format` 是**子命令**选项，必须写在子命令后面：`frcli report list -f json`；写成 `frcli -f json report list`
+  会报 `Error: No such option: -f`（2026-10-29 真实会话踩过一次，不是命令缺失）。
 - ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
   （`GET /decision/v10/report/templates/all/authentication`），实测该路由**恒返回 `[]`**（HTTP 200 的原始响应就是
   `{"data":[]}`，`keyword/type/id/pid` 多种参数形态同样为空）——**空数组不代表账号没权限**，别拿它判断
@@ -1071,6 +1073,7 @@ frcli schedule run "demo_任务名"                                   # 可选�
 3. **读模板绑定，不要猜导出值**：`report download` 后解析 `<C c= r=>` 的 `columnName`/公式，比较同一指标在不同 sheet/区域的绑定是否同口径（数量列、金额列混用是本次真因）。
 4. 修绑定用 `report cell --at ... --bind ... --apply`（模板被设计器占用会报锁，先让用户关 Designer）；**改绑口径必须同步改表头文字**（本次 O4/P4 表头仍写「销售量」、实际绑金额）。
 5. 改数据集 SQL：先独立 SQL 对拍，再 `report dataset --set-sql`，改后回读 + 导出核对；`select *` 的 CTE 里重命名同名列会被 Impala 拒（`duplicated inline view column alias`），要显式列；显式列会改变 TOP-N 商品池，结果有 0.0x% 级变动要主动向用户说明。
+6. **改单个指标口径时只动目标指标**：同一数据集/SQL 里其它指标（尤其毛利率等派生比率）保持原口径；真实会话（10-29）用户指出「毛利率不应该发生变化」——agent 把新口径的过滤条件连带套到了毛利率。改完用基线导出**逐指标对拍**：除目标指标外全部应一致，比率类还要确认分母没有被连带替换。
 
 ### 6.28 从「含同名 .py 的目录」运行 frcli：cwd 会遮蔽标准库
 
@@ -1097,6 +1100,9 @@ frcli report local-profile "<reportlets目录>" --keyword 销售 --tag chart-lin
 frcli report local-inspect "<reportlets目录>/<样例>.cpt" --design
 frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sheet "<sheet名>" --cells -n 200
 frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sheet "<sheet名>" --block 2 --cells
+
+# 4. 本地模板看数据集 SQL（不触发服务端校验；大模板比线上 datasets 快）
+frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql
 ```
 
 画像覆盖：`archetype/archetypes`（明细、分组、交叉、图表分析、主从、驾驶舱、填报、聚合、静态版面）、
@@ -1117,6 +1123,12 @@ frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sheet "<sheet名>
 5. 映射到 `report new/dataset/param/table/cell/style/crosstab/highlight/page/chart/widget/link`；
    具体配方查 `cpt-patterns.md` / `cpt-patterns2.md`。
 6. 结构回读、数据对账、预览交互和导出产物分别验收；XML 画像不能代替任何一项。
+
+**线上大模板读取慢的离线快路径**：`report datasets --sql` 由服务端全量解析模板，数 MB / 几十个数据集的
+模板实测 **10 分钟级甚至超时**（2026-10-29 真实会话：1.8MB 模板等了 11 分钟只能 kill；`report info` 也超时）。
+先 `report download "<模板>" -o /tmp/x.cpt` 拿模板原始字节，再 `report local-inspect /tmp/x.cpt --sql`
+离线看 `<TableData>/<Query>` 里的 SQL——不触发服务端校验，秒级返回；只想看数据集名时
+`report edit "<模板>" --list`（读模板字节）也很快。不要反复调大 `FRCLI_TIMEOUT` 重试或据此判定平台不可用。
 
 `PolyWorkSheet` 的 `Block` 有各自的单元格和坐标，两个块都可以有 `A1`；普通 `report cell/table`
 网格操作不支持它，不再把它误报为零格。远端模板需先 `report download` 到本地再检查。
