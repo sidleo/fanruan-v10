@@ -529,13 +529,16 @@ frcli report cell "$R" --at H3 --set-formula '=SUMPRECISE(B3[!0])' --apply      
 
    同一条公式在两种版面上结果相反、**两边都不报错** ⇒ 别用内联写法。
    **唯一安全姿势**：单独一格 `=SEQ()`，公式里引用它：`=SUM(SLICEARRAY(B3[!0],1,D3))` → 100/300/600/650/700 ✓。
-2. **`RANK` 在本安装里求不出值**：`=RANK(B3,B3[!0])` 渲染成 **`#NAME?`**（image 与 xlsx 都是），
-   而 `report datasets` **不报错**（说明函数名注册了、求值失败）。`MAPARRAY` 做排名的尝试也失败（恒返回 1）。
-   ⇒ **组内排名请写在 SQL 里**（`row_number() over (partition by …)`）。
-3. **不存在的函数名**（`ACCSUM` / `CUMULATIVE` / `COUNTD` / `DATEFORMAT` / `DATETRUNC`）会让整张模板渲染不出来，
-   `frcli report datasets` 直接报 `no function found: X` —— 这是最快的排查入口。
-4. 公式引用的**数组语法不通用**：`B3[!0]` 只在这套引擎里有效，导出 xlsx 时遇到 `RANK(...B3[!0]...)`
-   这类"服务端不计算、原样吐出"的函数会变成 Excel 的 `#NAME?`。
+2. **`RANK` 的数组参数与报表扩展上下文分别验证**：`RANK(number,ref,order)` 是内置函数，
+   `order=0` 降序、非零升序。配方中的 `=RANK(B3,B3[!0])` 曾出现 `#NAME?`，
+   该现象只证明此表达式在该版面下失败。报表扩展区域排名可用 `SORT(B3)`，复杂分组排名
+   也可在 SQL 中用窗口函数。`MAPARRAY(array,item表达式)` 是数组映射，不能从一次排名尝试推断它失效。
+3. **未识别的函数名称可能导致运行期解析失败**：`ACCSUM` / `CUMULATIVE` / `COUNTD` /
+   `DATEFORMAT` / `DATETRUNC` 未收录在随包基线中；若依赖插件需确认目标实例已安装。
+   先用 `report functions` 和 `formula-check` 检查，运行期的 `no function found: X` 再按实例排查。
+4. **层次坐标由 FineReport 计算**：`B3[!0]` 是报表扩展范围，不能作为 Excel 原生公式引用。
+   导出出现 `#NAME?` 时须核对源公式、参数类型、扩展关系和导出通道，不单凭错误值判断函数不存在。
+   函数入口与语义边界见 [函数与公式](formulas.md)。
 5. `SLICEARRAY` 的区间是**闭区间且 1 基**，但**返回的是数组**：一格直接写 `=SLICEARRAY(B3[!0],1,2)`
    渲染成**字符串 `100,200`**（不是数值 300）；要拿到 300 必须套聚合 `=SUM(SLICEARRAY(B3[!0],1,2))`。
    ⇒ 别把"函数返回什么"与"格子里显示什么"混为一谈。

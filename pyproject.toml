@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "frcli"
-version = "0.10.25"
+version = "0.10.26"
 description = "FineReport CLI 工具 - 让 agent 通过命令行与 FineReport 服务器交互"
 requires-python = ">=3.10"
 dependencies = [

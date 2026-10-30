@@ -75,7 +75,8 @@ python <base>/references/run.py server list
 1. **软链自愈**：若 PATH 中已有 `frcli` 软链，但指向的不是当前 skill 的 shim（旧路径 / 失效路径），自动重建指向当前 skill。
 2. **版本提示**：若 `frcli` 来自其他安装（pip 装过、别的 skill 副本），`run.py` 会打印该命令的实际来源路径与当前 skill 内置源码版本，让 agent 判断是否在用旧版。仅提示，不阻断执行。
 
-> 约定：skill 源码更新时同步 bump 版本号（`src/frcli/__init__.py` 的 `__version__` 与 `SKILL.md` frontmatter 的 `metadata.version`）。
+> 约定：frcli 与 skill 共用版本号。发布时同步更新 `src/frcli/__init__.py` 的 `__version__`、
+> `pyproject.toml` 的 `version`、`SKILL.md` frontmatter 的 `metadata.version`，并重新生成分发包。
 
 ## 3. 自举方式 C —— pip 安装（装进当前 Python 环境）
 

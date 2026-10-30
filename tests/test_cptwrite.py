@@ -566,8 +566,8 @@ def test_plan_param():
     assert any(c["kind"] == "warning" for c in changes), "无默认值要警告"
     with pytest.raises(ApiError, match="NAME=VALUE"):
         reportops.plan_param(CPT, set_default=["topn"])
-    with pytest.raises(ApiError, match="本来就是"):
-        reportops.plan_param(CPT, set_default=["topn=10"])
+    unchanged, changes = reportops.plan_param(CPT, set_default=["topn=10"])
+    assert unchanged == CPT and changes[0]["how"] == "unchanged"
     with pytest.raises(ApiError, match="没有给任何参数动作"):
         reportops.plan_param(CPT)
 

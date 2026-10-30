@@ -1,8 +1,8 @@
 ---
 name: fanruan-v10
-description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
+description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.10.25
+  version: 0.10.26
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -20,6 +20,9 @@ metadata:
 - 查看报表的数据集定义与 SQL（口径溯源、找报表参数）
 - 查/改/跑 FineReport 定时任务（调度、执行历史）
 - 定位「报表里这个数怎么来的」
+- **函数检索、公式检查与动态默认值**：`report functions/formula-check` 离线查函数与基础语法；
+  参数默认昨天/月初等公式用 `report param --set-formula` 或 `report widget --default-formula`。
+  使用前读 **`references/formulas.md`**，确认函数类别、参数顺序与使用上下文。
 - **改已有模板**：`report upload` 覆盖 / `report delete` 删除；
   `report edit` 定点改**数据集 SQL / 连接 / 参数**（§6.7）；改**单元格**用 `report cell`（§6.14）
 - **从零创作模板**：`report new / dataset / table / cell / param / style` 造出一张能取数的报表
@@ -33,6 +36,8 @@ metadata:
 这一层，覆盖绝大多数**取数类报表**。
 
 ## 2. 前置条件
+
+`report functions/formula-check` 完全离线，不需要配置或启动实例。
 
 仅检索、画像或检查本地 CPT 示例时，使用 `report local-examples/local-profile/local-inspect`，
 不需要配置或启动实例。聚合块和单元格检查见 `references/cpt-local-examples.md`；从样例学习报表设计见
@@ -62,6 +67,10 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── set-default NAME
 │   └── test [NAME]                          连接 + 登录校验
 ├── report                          报表模板（决策平台目录树）
+│   ├── functions [NAME] [--keyword K] [--category C] [-f json|table]
+│   │                                          离线函数目录：名称/签名/用途/来源，不执行公式
+│   ├── formula-check EXPR [--context cell|parameter|widget] [--param NAME …]
+│   │                                          离线基础语法检查，未知/插件函数只提示
 │   ├── local-examples DIRECTORY [--keyword K] [--contains TEXT] [-n 30]  离线查找本地 CPT
 │   ├── local-profile DIRECTORY [--keyword K] [--contains TEXT] [--tag T] [-n 20]
 │   │                                                                     批量画像：原型/技术/图表/代表样例
@@ -88,7 +97,8 @@ frcli [--version] [-i INSTANCE] [-v]
 │   ├── image REPORT [-o FILE] [--form]      服务端直接渲染成 PNG（🟢 只读，不走 REST 导出）
 │   │                                          .cpt 走 exportWorkBookAsImageData；.frm 加 --form
 │   ├── edit REPORT [--list] [--dataset D] [--sql S | --sql-file F | --replace OLD=NEW …]
-│   │              [--connection C] [--param P --default V] [--apply] [--any-path]  结构化改模板（见 §6.7）
+│   │              [--connection C] [--param P --default V|--default-formula EXPR]
+│   │              [--apply] [--any-path]       结构化改模板（见 §6.7、references/formulas.md）
 │   │              ⚠️ **默认 dry-run 只打印 diff**；`--apply` 才写，且必须先设 $FRCLI_WRITE_SCOPE
 │   │                 或加 --any-path（不设范围 = 拒绝，见 §4 安全约束）
 │   ├── new REMOTE [--sheet NAME] [--from TEMPLATE] [--output FILE] [--force]   从零建空白模板（见 §6.14）
@@ -101,7 +111,7 @@ frcli [--version] [-i INSTANCE] [-v]
 │   │        --add NAME --conn C --sql S|--sql-file F [--param p=v …] [--page-sql S]
 │   │        --set-sql NAME --sql S [--param p=v …] | --remove NAME   [--apply] [--any-path]
 │   ├── param REMOTE --list | --add p=v … | --set-default p=v … | --remove p … [--apply]
-│   │                                                     模板参数（公式里的 `$x` 靠它给默认值）
+│   │        | --set-formula p=EXPR …                      模板参数；显式区分静态值与公式默认值
 │   ├── style REMOTE --list | --add [--xml-file F | --num-format FMT --bold --bg C --align X --border]
 │   │                                                     样式表（数字格式/粗体/底色/边框），加完用 --style N 绑
 │   ├── table REMOTE --dataset ds --at A1 --columns a,b,c [--header] [--labels "x,y,z"]
@@ -125,7 +135,7 @@ frcli [--version] [-i INSTANCE] [-v]
 │   │          [--series S] --value V [--fn sum] [--title T] [--show-title] [--cs N] [--rs N] [--sheet S]
 │   │          | --list                                  图表（VanChart；导出 xlsx 是嵌入图片）
 │   ├── widget REMOTE --param p --type combo|date|text|check|number [--options "a,b"]
-│   │          [--default v] [--label L] [--x/--y/--width/--height] | --list
+│   │          [--default v|--default-formula EXPR] [--label L] [--x/--y/--width/--height] | --list
 │   │                                                     参数面板控件（**控件名=参数名** 才联动）
 │   └── link REMOTE --at A3 --to 报表路径|URL [--type reportlet|web|javascript]
 │              [--param k=v …] [--frame _self|_blank] [--sheet S] | --clear | --list
@@ -783,9 +793,10 @@ frcli report table "$R" --sheet 明细表 --dataset ds1 --at A2 --columns code,c
 | `=SUM(SLICEARRAY(B3[!0],1,SEQ()))` 每行都得整列合计 | `SEQ()` 直接写进公式里不按行求值 | 先用一格写 `=SEQ()`，累计写 **`=SUM(SLICEARRAY(B3[!0],1,D3))`** |
 
 配套两条：
-- **不存在的函数会让整张模板渲染不出来**（`ACCSUM`/`COUNTD`/`DATEFORMAT`/`DATETRUNC` 都不存在；
-  `RANK` 存在但求值失败 → 渲染 `#NAME?`）。**组内排名请写在 SQL 里**。
-  排查入口：`frcli report datasets <模板>` 会直接报 `no function found: X`（数据集坏 vs 渲染坏的分界线）。
+- **函数名和求值上下文分别核对**：先用 `report functions NAME` 查基线，再用 `formula-check` 查基础语法。
+  `RANK(value,array,order)` 是内置函数；某条 `RANK(B3,B3[!0])` 失败不能推断所有 RANK 都不可用。
+  插件名称需另行核实，报表排名可选择 `SORT` 或在 SQL 中计算。详见 `references/formulas.md`。
+  `report datasets` 的 `no function found: X` 是运行期解析错误，不是全部公式已正确求值的证明。
 - **条件属性隐藏整行** = `--rule 'v<100:rowheight=0'`（服务端 `RowHeight` 行高 0），
   导出 xlsx 里那一行**整行消失**（不是行高变 0），抄官方 `doc/Primary/DetailReport/条件属性实现折叠树.cpt`。
 
@@ -1155,6 +1166,20 @@ frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql
 见本地知识库，不在本仓库记录）；目标模板当天记录为空时查同目录姊妹模板。
 0.10.23 起 `report list`/`report ws-list` 空结果会在 stderr 提示「可能无权限」，`report datasets/download`
 撞权限/找不到时也会提示改用元数据表；别把空结果当成「报表不存在」。
+
+### 6.32 函数检索、基础语法与公式默认值
+
+以下能力从 frcli / skill **0.10.26** 起提供，两者使用相同版本号。
+
+`report functions` 随包提供 180 个实现类和 3 个数据集方法的目录；`report formula-check`
+检查单双引号、转义与括号配对，并提示未知函数和上下文依赖。两条命令均离线运行，
+不加载实例，不执行公式；返回 `runtime_verified: false`。当前实例的插件和自定义函数另行核对。
+
+动态默认值使用 `report param --set-formula p=EXPR`、`report widget --default-formula EXPR`，
+或 `report edit --dataset D --param p --default-formula EXPR`。静态值与公式互斥，
+`--default` 即使以 `=` 开头也保持文本。🔴 加 `--apply` 写入前仍须确认目标影响并满足写范围。
+模板参数、数据集参数和控件默认值属于不同作用域；控件命令默认同时更新同名模板参数。
+函数选择、完整命令与验收步骤见 **`references/formulas.md`**。
 
 ## 7. 故障排查
 

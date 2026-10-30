@@ -18,7 +18,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from . import chartxml, cptxml
+from . import chartxml, cptxml, formulas
 from .config import load_config
 from .exceptions import ApiError
 from .remotedesign import (RemoteDesignSession, _unwrap_value, assert_in_write_scope,
@@ -158,10 +158,13 @@ def read_template(config, report_path: str) -> bytes:
 # 结构化编辑
 # ---------------------------------------------------------------------------
 def plan_edit(text: str, dataset: str = None, sql: str = None, sql_file: str = None,
-              replace=(), connection: str = None, param: str = None, default: str = None):
+              replace=(), connection: str = None, param: str = None, default: str = None,
+              default_formula: str = None):
     """在内存里算出编辑后的文本与变更清单（不碰网络）。"""
     changes = []
     new_text = text
+    if default is not None and default_formula is not None:
+        raise ApiError("--default 与 --default-formula 只能给一个")
     tds = {t["name"]: t for t in cptxml.table_datas(text)}
     if dataset and dataset not in tds:
         raise ApiError(f"模板里没有数据集 {dataset}；现有: {', '.join(tds) or '(无)'}")
@@ -202,6 +205,7 @@ def plan_edit(text: str, dataset: str = None, sql: str = None, sql_file: str = N
                         "diff": _text_diff(target["sql"], cur, f"{dataset}.sql")})
 
     if connection is not None:
+        target = next((t for t in cptxml.table_datas(new_text) if t["name"] == dataset), None)
         el = target["connection_element"]
         if el is None:
             raise ApiError(f"数据集 {dataset} 没有 <Connection>/<DatabaseName> 元素")
@@ -212,24 +216,24 @@ def plan_edit(text: str, dataset: str = None, sql: str = None, sql_file: str = N
         changes.append({"kind": "dataset.connection", "dataset": dataset,
                         "before": before, "after": connection})
 
-    if param is not None or default is not None:
-        if param is None or default is None:
-            raise ApiError("改参数默认值要同时给 --param <名字> 与 --default <值>")
+    if param is not None or default is not None or default_formula is not None:
+        if param is None or (default is None and default_formula is None):
+            raise ApiError("改参数默认值要同时给 --param <名字> 与 --default <值> 或 --default-formula <公式>")
+        target = next((t for t in cptxml.table_datas(new_text) if t["name"] == dataset), None)
         if target is None:
             raise ApiError("改数据集参数需要 --dataset <名字>")
         hit = [p for p in target["parameters"] if p["name"] == param]
         if not hit:
             names = [p["name"] for p in target["parameters"]]
             raise ApiError(f"数据集 {dataset} 没有参数 {param}；现有: {', '.join(names) or '(无)'}")
-        el = hit[0]["default_element"]
-        if el is None:
-            raise ApiError(f"参数 {param} 没有 <O> 元素，无法设默认值")
         before = hit[0]["default"]
-        if (before or "") == default:
-            raise ApiError(f"参数 {param} 的默认值本来就是 {default!r}，无需修改")
-        new_text = cptxml.set_text(new_text, el, default)
+        new_text, how = cptxml.set_default_value(new_text, hit[0]["element"],
+                                                default, default_formula)
         changes.append({"kind": "dataset.parameter", "dataset": dataset, "param": param,
-                        "before": before, "after": default})
+                        "before": before, "after": (cptxml.check_formula(default_formula)
+                                                      if default_formula is not None else default),
+                        "default_type": "formula" if default_formula is not None else "value",
+                        "how": how})
 
     if not changes:
         raise ApiError("没有给任何编辑动作（--sql / --replace / --connection / --param+--default）")
@@ -248,11 +252,16 @@ def edit_template(config, report_path: str, apply: bool = False, **kwargs) -> di
         "applied": False,
         "bytes_before": len(data),
         "bytes_after": len(new_text.encode("utf-8")),
+        "changed": text != new_text,
         "changes": changes,
     }
     if not apply:
         result["dry_run"] = True
         result["hint"] = "以上为 dry-run，未写服务端；确认无误加 --apply"
+        return result
+
+    if text == new_text:
+        result.update({"dry_run": False, "note": "内容无变化，未发起写请求"})
         return result
 
     assert_in_write_scope(remote)          # 与 upload/delete 同一道守门
@@ -658,6 +667,9 @@ def _warn_formula(changes, text: str, formula: str):
                         "message": f"公式引用了没声明默认值的参数 {', '.join(missing)}："
                                    "不传 --params 时会静默变成空字符串（导出照成功）。"
                                    f"补：`report param <报表> --add {missing[0]}=<默认值>`"})
+    for warning in formulas.analyze_formula(formula)["warnings"]:
+        if warning["code"] == "unknown_function":
+            changes.append({"kind": "warning", **warning})
 
 
 def _note_column(changes, text: str, binding: str):
@@ -862,9 +874,19 @@ def template_datasets(config, report_path: str, sql: bool = False) -> dict:
 # ---------------------------------------------------------------------------
 # report param（模板参数；决定 `$x` 能不能在单元格公式里解析）
 # ---------------------------------------------------------------------------
-def plan_param(text: str, add=(), remove=(), set_default=()):
+def plan_param(text: str, add=(), remove=(), set_default=(), set_formula=()):
     """模板参数（`ReportParameterAttr > Parameters`）的增删改（内存计算）。"""
     changes, new_text = [], text
+    static_names = {param_pair(item)[0].casefold() for item in (*add, *set_default)}
+    formula_pairs = []
+    for item in set_formula:
+        name, sep, formula = str(item).partition("=")
+        name = name.strip()
+        if not sep or not name:
+            raise ApiError(f"--set-formula 要写成 NAME=EXPR，收到 {item!r}")
+        if name.casefold() in static_names:
+            raise ApiError(f"参数 {name} 的静态默认值与公式默认值不能同时设置")
+        formula_pairs.append((name, cptxml.check_formula(formula)))
     for item in remove:
         new_text, _ = cptxml.remove_template_parameter(new_text, item)
         changes.append({"kind": "param.remove", "name": item})
@@ -878,11 +900,15 @@ def plan_param(text: str, add=(), remove=(), set_default=()):
         if not sep:
             raise ApiError(f"--set-default 要写成 NAME=VALUE，收到 {item!r}")
         new_text, how = cptxml.add_template_parameter(new_text, name, default)
-        if how == "unchanged":
-            raise ApiError(f"参数 {name} 的默认值本来就是 {default!r}")
-        changes.append({"kind": "param.default", "name": name, "default": default})
+        changes.append({"kind": "param.default", "name": name, "default": default, "how": how})
+    for name, formula in formula_pairs:
+        new_text, how = cptxml.add_template_parameter(new_text, name, formula=formula)
+        changes.append({"kind": "param.formula", "name": name, "default": formula,
+                        "default_type": "formula", "how": how})
+    for _, formula in formula_pairs:
+        _warn_formula(changes, new_text, formula)
     if not changes:
-        raise ApiError("没有给任何参数动作（--add / --remove / --set-default）")
+        raise ApiError("没有给任何参数动作（--add / --remove / --set-default / --set-formula）")
     return new_text, changes
 
 
@@ -897,7 +923,7 @@ def template_params(config, report_path: str) -> dict:
     params = cptxml.template_parameters(text)
     return {"action": "param-list", "report": to_workspace_path(report_path),
             "count": len(params),
-            "parameters": [{"name": p["name"], "default": p["default"]} for p in params],
+            "parameters": [{k: p[k] for k in ("name", "default", "default_type")} for p in params],
             "datasets": cptxml.dataset_names(text),
             "note": "单元格公式里 `$名字` 解析的就是这里的声明（同名参数会被 --params 覆盖）；"
                     "数据集 SQL 里的 `${名字}` 看数据集自己的 <Parameters>"}
@@ -1203,28 +1229,41 @@ def template_highlights(config, report_path: str, at: str = None, sheet: str = N
 # ---------------------------------------------------------------------------
 def plan_widget(text: str, param: str, kind: str = "combo", options=(), default: str = None,
                 label: str = None, x: int = 30, y: int = 20, width: int = 120,
-                height: int = 21, declare: bool = True):
+                height: int = 21, declare: bool = True, default_formula: str = None):
     """给模板加一个参数面板控件（`<ParameterUI>` + `<Widget>`，内存计算）。
 
     控件名 = 参数名（服务端 `getWidgetByName(parameter.getName())` 就是这么找的），
     所以 `--param p` 必须与模板参数（以及 SQL 里的 `${p}`）同名才联动。
     """
     cptxml.check_widget_type(kind)
+    if default is not None and default_formula is not None:
+        raise ApiError("--default 与 --default-formula 只能给一个")
+    if default_formula is not None:
+        default_formula = cptxml.check_formula(default_formula)
     changes = []
     if declare:
         names = [p["name"] for p in cptxml.template_parameters(text)]
         if param not in names:
-            text, how = cptxml.add_template_parameter(text, param, default or "")
+            text, how = cptxml.add_template_parameter(text, param, default=default,
+                                                      formula=default_formula)
             changes.append({"kind": "param.add", "param": param,
-                            "default": default or "", "how": how})
-        elif default is not None:
-            text, how = cptxml.add_template_parameter(text, param, default or "")
+                            "default": default_formula if default_formula is not None else (default or ""),
+                            "how": how})
+        elif default is not None or default_formula is not None:
+            text, how = cptxml.add_template_parameter(text, param, default=default,
+                                                      formula=default_formula)
             changes.append({"kind": "param.default", "param": param,
-                            "default": default, "how": how})
+                            "default": default_formula if default_formula is not None else default,
+                            "how": how})
     text, info = cptxml.add_panel_widget(text, param, kind=kind, options=options,
                                          default=default, label=label, x=x, y=y,
-                                         width=width, height=height)
+                                         width=width, height=height, default_formula=default_formula)
     changes.append({"kind": "widget.set", **info})
+    if default_formula is not None:
+        _warn_formula(changes, text, default_formula)
+        for warning in formulas.analyze_formula(default_formula, context="widget")["warnings"]:
+            if warning["code"] == "unsupported_widget_dataset":
+                changes.append({"kind": "warning", **warning})
     changes.append({"kind": "warning",
                     "message": "参数面板是**预览态 UI**：导出通道只验证「参数仍生效」，"
                                "控件是否渲染要打开预览页看；XML 结构已与官方样例逐节点对齐"})

@@ -11,7 +11,7 @@ CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 s
 | 命令组 | 主要用途与入口 |
 | --- | --- |
 | `server` | 本地多实例配置：`list`、`add`、`remove`、`set-default`、`test`。 |
-| `report` | 查询模板、参数、数据集和 SQL；`preview` 数据集预览、`download` 原始模板、`upload/delete`、工作表与单元格编辑、表格/交叉表/图表/控件创作；`local-*` 离线示例分析。 |
+| `report` | 查询模板、参数、数据集和 SQL；`functions/formula-check` 离线函数检索与检查；`preview` 数据集预览、`download` 原始模板、`upload/delete`、工作表与单元格编辑、表格/交叉表/图表/控件创作；`local-*` 离线示例分析。 |
 | `export` | 导出 `pdf`、`excel`、`word`、`image`、`csv`，或按清单 `batch` 导出。 |
 | `attach` | `upload/remove` 管理服务器附件缓存。 |
 | `system` | 查询 `version`、`health`、`modules`、`authority`、`login-policy`。 |
@@ -89,6 +89,37 @@ frcli report local-inspect "<reportlets目录>/demo.cpt" --sql          # 数据
 `local-profile` 汇总原型、技术、图表类型和代表样例，`local-inspect --design` 提供版面与交互画像，`--cells` 显示具体格号，`--sql` 离线解析数据集 SQL 与连接名（大模板比线上 `report datasets` 快）。聚合报表 `PolyWorkSheet` 的各个块拥有独立坐标；普通网格编辑不能直接用于这些聚合块。
 
 结构分析需要结合实际渲染和导出验收。操作细节见 [本地示例检查](references/cpt-local-examples.md)，选型与设计方法见 [从示例提炼设计](references/cpt-design-from-examples.md)。
+
+## 函数、公式与动态默认值
+
+无需实例配置即可检索 FineReport 10 函数和检查基础语法：
+
+```bash
+frcli report functions RANK
+frcli report functions --keyword 日期 -f table
+frcli report functions --category hierarchy -f table
+frcli report formula-check '=IF($topn>0,SUM(ds.select(金额)),0)' --param topn
+```
+
+目录含 180 个内置实现类和 3 个数据集方法的名称、简要用途、签名及来源；未核实的签名
+显式留空。检查支持单双引号、反斜杠转义和括号配对，未知名称按插件/自定义函数提示。
+检查不执行公式，也不证明当前实例能够正确求值。
+
+动态默认值用显式参数，与静态文本区分，以下均为 dry-run：
+
+```bash
+frcli report param demo_group/demo_user/demo.cpt \
+    --set-formula 'edate=FORMAT(TODAY()-1,"yyyyMMdd")'
+frcli report widget demo_group/demo_user/demo.cpt --param edate --type text \
+    --default-formula 'FORMAT(TODAY()-1,"yyyyMMdd")'
+frcli report edit demo_group/demo_user/demo.cpt --dataset ds --param edate \
+    --default-formula 'FORMAT(TODAY()-1,"yyyyMMdd")'
+```
+
+`param` 只改模板参数，`edit --dataset` 只改目标数据集参数；`widget` 默认同时更新控件
+与同名模板参数。`--default` 和 `--default-formula` 互斥；`--apply` 沿用模板写范围、
+占锁、备份和回读校验。`param/widget --list` 的 `default_type` 区分公式与静态值。
+函数语义、来源边界和运行期验收见 [函数与公式](references/formulas.md)。
 
 ## 导出与模板创作
 
@@ -204,3 +235,6 @@ git diff --check
 维护 DSH 会话问题可用 `python tools/scan_sessions.py --date YYYY-MM-DD`；需本机存在 DSH 会话及 `zstd`，不带日期默认扫描昨天。工具只收集线索，结论需复核，台账只保留脱敏信息。
 
 分发产物为 `dist/fanruan-v10.skill`，该文件在 `.gitignore` 中单独放行。打包前准备仓库外脱敏黑名单，执行 `tools/build_skill.sh --check` → `tools/build_skill.sh` → `tools/build_skill.sh --check`，确保新包也通过检查。详细门禁见 [发布与脱敏](docs/发布与脱敏.md)，信息归属见 [内容落点判定](docs/内容落点判定.md)。
+
+frcli 与 skill 共用版本号；发布时同步更新 `src/frcli/__init__.py::__version__`、
+`pyproject.toml::project.version` 和 `SKILL.md::metadata.version`，再核对新包内三处版本与源码一致。

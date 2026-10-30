@@ -10,7 +10,7 @@ from ..client import FineReportClient
 from ..output import output_data, success, error
 from ..remotedesign import (ALLOW_ANY_ENV, assert_in_write_scope, upload_template,
                             delete_template, workspace_list)
-from .. import local_cpt, reportops
+from .. import formulas, local_cpt, reportops
 
 #: 写范围判定本身只有一份（`remotedesign.assert_in_write_scope`），语义是
 #: **fail-closed**：没设 `$FRCLI_WRITE_SCOPE` 就拒绝，`--any-path` 才放行。
@@ -72,6 +72,42 @@ def _expand_user_path(value):
     内部（expanduser → resolve）判断并报 ApiError。
     """
     return os.path.expanduser(value) if value else value
+
+
+@report_group.command("functions")
+@click.argument("name", required=False)
+@click.option("--keyword", help="按函数名、签名或中文用途搜索")
+@click.option("--category", help="按分类过滤；不带过滤时输出分类清单")
+@click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
+def functions_cmd(name, keyword, category, fmt):
+    """离线查 FineReport 10 函数；不需要实例，不执行公式。
+
+    例：report functions RANK；report functions --keyword 日期；
+    report functions --category hierarchy。目录不限制插件/自定义函数。
+    """
+    try:
+        result = formulas.functions(name, keyword, category)
+        if fmt == "table":
+            output_data([{k: r[k] for k in ("name", "category", "signature", "summary")}
+                         for r in result["functions"]], format=fmt)
+        else:
+            output_data(result)
+    except Exception as e:
+        error(e)
+
+
+@report_group.command("formula-check")
+@click.argument("expression")
+@click.option("--context", type=click.Choice(["cell", "parameter", "widget"]), default="cell",
+              show_default=True, help="公式使用位置；用于提示上下文限制")
+@click.option("--param", "declared_params", multiple=True, help="已声明参数名，可重复；未给时不检查参数声明")
+def formula_check_cmd(expression, context, declared_params):
+    """离线检查基础语法及函数名称；未知名称只提示，不运行报表。"""
+    try:
+        output_data(formulas.analyze_formula(expression, context,
+                                             declared_params or None))
+    except Exception as e:
+        error(e)
 
 
 @report_group.command("local-examples")
@@ -439,6 +475,7 @@ def report_image(report_path, output, form, instance):
 @click.option("--connection", help="改该数据集的数据连接名（<DatabaseName>）")
 @click.option("--param", help="要改默认值的数据集参数名")
 @click.option("--default", help="参数新默认值（配合 --param）")
+@click.option("--default-formula", help="数据集参数公式默认值（配合 --param；与 --default 互斥）")
 @click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印 diff）")
 @click.option("--any-path", is_flag=True,
               help="🔴 确认写这个目标而不限范围（本次调用生效；没有它就必须先设 "
@@ -446,7 +483,7 @@ def report_image(report_path, output, form, instance):
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
 def report_edit(report_path, list_only, dataset, sql, sql_file, replace, connection,
-                param, default, apply, any_path, fmt, instance):
+                param, default, default_formula, apply, any_path, fmt, instance):
     """结构化编辑服务端模板（默认 dry-run）
 
     拉模板 → 结构化改 XML（不是正则；除目标元素外字节原样保留）→ 打印 diff。
@@ -469,7 +506,7 @@ def report_edit(report_path, list_only, dataset, sql, sql_file, replace, connect
         result = reportops.edit_template(
             config, report_path, apply=apply, dataset=dataset, sql=sql,
             sql_file=sql_file, replace=list(replace), connection=connection,
-            param=param, default=default)
+            param=param, default=default, default_formula=default_formula)
         if fmt == "table":
             for ch in result["changes"]:
                 if ch.get("diff"):
@@ -974,12 +1011,14 @@ def report_dataset(report_path, list_only, full, add_name, conn, sql_text, sql_f
 @click.option("--remove", "removes", multiple=True, help="删模板参数（可重复）")
 @click.option("--set-default", "defaults", multiple=True,
               help="改默认值，写 名字=值（可重复）")
+@click.option("--set-formula", "formula_defaults", multiple=True,
+              help="添加/改公式默认值，写 名字=表达式（可重复；静态值用 --set-default）")
 @click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印 diff）")
 @click.option("--any-path", is_flag=True,
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
-def report_param(report_path, list_only, adds, removes, defaults, apply, any_path, fmt,
+def report_param(report_path, list_only, adds, removes, defaults, formula_defaults, apply, any_path, fmt,
                  instance):
     """模板参数（决定单元格公式里的 `$名字` 能不能解析）
 
@@ -1000,7 +1039,8 @@ def report_param(report_path, list_only, adds, removes, defaults, apply, any_pat
         if apply:
             assert_write_scope(report_path, any_path)
         result = reportops.edit_param(config, report_path, apply=apply, add=adds,
-                                      remove=removes, set_default=defaults)
+                                      remove=removes, set_default=defaults,
+                                      set_formula=formula_defaults)
         _out_plan(result, fmt)
     except Exception as e:
         error(e)
@@ -1300,6 +1340,7 @@ def report_link(report_path, list_only, at, to, kind, params, frame, clear, shee
               help="combo(下拉) / date(日期) / text(文本) / check(下拉多选) / number(数字)")
 @click.option("--options", help="下拉选项，逗号分隔（key=value 或只给 key），如 华东,华南")
 @click.option("--default", "default_value", help="控件默认值（同时给模板参数补默认值）")
+@click.option("--default-formula", help="公式默认值（同时更新控件与模板参数；与 --default 互斥）")
 @click.option("--label", help="控件标签（缺省 `参数名:`）")
 @click.option("--x", type=int, default=30, show_default=True, help="面板坐标 x")
 @click.option("--y", type=int, default=20, show_default=True, help="面板坐标 y")
@@ -1311,7 +1352,7 @@ def report_link(report_path, list_only, at, to, kind, params, frame, clear, shee
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
-def report_widget(report_path, list_only, param, kind, options, default_value, label, x, y,
+def report_widget(report_path, list_only, param, kind, options, default_value, default_formula, label, x, y,
                   width, height, no_declare, apply, any_path, fmt, instance):
     """参数面板控件（下拉/日期/文本，🟠 默认 dry-run）
 
@@ -1337,7 +1378,7 @@ def report_widget(report_path, list_only, param, kind, options, default_value, l
         result = reportops.edit_widget(config, report_path, apply=apply, param=param, kind=kind,
                                        options=opts, default=default_value, label=label,
                                        x=x, y=y, width=width, height=height,
-                                       declare=not no_declare)
+                                       declare=not no_declare, default_formula=default_formula)
         _out_plan(result, fmt)
     except Exception as e:
         error(e)

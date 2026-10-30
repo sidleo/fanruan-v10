@@ -29,6 +29,7 @@ cpt 是帆软自有序列化格式，通用 XML 往返会**丢注释、改自闭
 import re
 
 from .exceptions import ApiError
+from .formulas import check_formula
 
 WORKBOOK_TAG = "WorkBook"
 
@@ -279,7 +280,7 @@ def parameters_of(text: str, td: Element):
         o_el = o[0] if o else None
         out.append({
             "name": attrs[0].attrs.get("name", "") if attrs else "",
-            "default": o_el.text(text) if o_el else None,
+            **default_value(text, o_el),
             "element": p,
             "default_element": o_el,
         })
@@ -1785,7 +1786,7 @@ def check_widget_type(kind):
 
 def widget_xml(param: str, kind: str = "combo", options=(), default: str = None,
                label: str = None, x: int = 30, y: int = 20, width: int = 120,
-               height: int = 21) -> str:
+               height: int = 21, default_formula: str = None) -> str:
     """一个参数面板控件（`BoundsWidget` + `InnerWidget`）。"""
     key = check_widget_type(kind)
     cls = WIDGET_TYPES[key]
@@ -1801,8 +1802,10 @@ def widget_xml(param: str, kind: str = "combo", options=(), default: str = None,
             k, _, v = opt.partition("=")
             body.append(f'<Dict key="{_escape_attr(k)}" value="{_escape_attr(v or k)}"/>')
         body += ["</CustomDictAttr>", "</Dictionary>"]
-    if default is not None:
-        body += ["<widgetValue>", "<O>", f"<![CDATA[{_cdata(default, '控件默认值')}]]></O>",
+    if default is not None and default_formula is not None:
+        raise ApiError("--default 与 --default-formula 只能给一个")
+    if default is not None or default_formula is not None:
+        body += ["<widgetValue>", default_object_xml(default, default_formula),
                  "</widgetValue>"]
     body += ["</InnerWidget>", f'<BoundsAttr x="{int(x)}" y="{int(y)}" '
                               f'width="{int(width)}" height="{int(height)}"/>', "</Widget>"]
@@ -1838,13 +1841,13 @@ def panel_widgets(text: str) -> list:
             if attr is not None:
                 opts = [f"{d.attrs.get('key')}={d.attrs.get('value')}"
                         for d in _sub_elements(text, attr, "Dict", path=())]
-        dflt = None
-        if val is not None:
-            o = _first_direct(text, val, "O")
-            dflt = (o.text(text).strip() if o is not None else val.text(text).strip())
+        o = _first_direct(text, val, "O") if val is not None else None
+        defaults = default_value(text, o)
+        if o is None and val is not None:
+            defaults["default"] = val.text(text).strip()
         item = {"param": name.attrs.get("name") if name is not None else None,
                 "class": inner.attrs.get("class", "").rsplit(".", 1)[-1],
-                "options": opts, "default": dflt}
+                "options": opts, **defaults}
         if bounds is not None:
             item.update({k: bounds.attrs.get(k) for k in ("x", "y", "width", "height")})
         out.append(item)
@@ -1877,11 +1880,12 @@ def ensure_panel(text: str) -> str:
 
 def add_panel_widget(text: str, param: str, kind: str = "combo", options=(), default=None,
                      label: str = None, x: int = 30, y: int = 20, width: int = 120,
-                     height: int = 21):
+                     height: int = 21, default_formula: str = None):
     """往参数面板加/换一个控件（同名控件会被替换）。"""
     text = ensure_panel(text)
     panel = panel_element(text)
-    snippet = widget_xml(param, kind, options, default, label, x, y, width, height)
+    snippet = widget_xml(param, kind, options, default, label, x, y, width, height,
+                         default_formula=default_formula)
     layout = _first_child(text, panel, "Layout")
     existing = panel_widgets(text)
     for item in existing:
@@ -1891,6 +1895,10 @@ def add_panel_widget(text: str, param: str, kind: str = "combo", options=(), def
                 inner = _first_direct(text, w, "InnerWidget")
                 nm = _first_direct(text, inner, "WidgetName") if inner is not None else None
                 if nm is not None and nm.attrs.get("name") == param:
+                    if text[w.open_start:w.close_end] == snippet:
+                        return text, {"param": param, "type": kind, "replaced": False,
+                                      "options": list(options), "default": default,
+                                      "default_formula": default_formula}
                     text = delete_cell_child(text, w)
                     break
             panel = panel_element(text)
@@ -1900,7 +1908,8 @@ def add_panel_widget(text: str, param: str, kind: str = "combo", options=(), def
         raise ApiError("参数面板没有 <Layout>，无法加控件")
     text = append_child(text, layout, snippet)
     return text, {"param": param, "type": kind, "replaced": any(
-        i["param"] == param for i in existing), "options": list(options), "default": default}
+        i["param"] == param for i in existing), "options": list(options), "default": default,
+        "default_formula": default_formula}
 
 
 # ---------------------------------------------------------------------------
@@ -2308,26 +2317,60 @@ def template_parameters(text: str):
     for p in _sub_elements(text, params_el, "Parameter", path=()):
         attrs = _first_direct(text, p, "Attributes")
         o = _first_direct(text, p, "O")
+        defaults = default_value(text, o)
+        if o is None:
+            defaults["default"] = ""
         out.append({"name": attrs.attrs.get("name", "") if attrs else "",
-                    "default": o.text(text) if o else "",
+                    **defaults,
                     "element": p, "default_element": o})
     return out
 
 
-def add_template_parameter(text: str, name: str, default: str = "") -> tuple:
+def default_value(text: str, o: Element) -> dict:
+    """还原默认值的类型；公式正文位于 O/Attributes，不能读取整段内部 XML。"""
+    if o is None:
+        return {"default": None, "default_type": "value"}
+    info = _classify_o(text, o)
+    formula = info.get("kind") == "formula"
+    return {"default": info.get("formula") if formula else o.text(text),
+            "default_type": "formula" if formula else "value"}
+
+
+def default_object_xml(default: str = None, formula: str = None) -> str:
+    """静态字面量与公式显式区分；以等号开头的静态值仍是文本。"""
+    if default is not None and formula is not None:
+        raise ApiError("静态默认值与公式默认值只能给一个")
+    if formula is not None:
+        return o_xml(formula=check_formula(formula))
+    return o_xml(value=default or "")
+
+
+def set_default_value(text: str, parent: Element, default: str = None,
+                      formula: str = None) -> tuple:
+    """只改目标父元素的直接 O 子节点，保留同名参数的其他作用域。"""
+    snippet = default_object_xml(default, formula)
+    desired = {"default": check_formula(formula) if formula is not None else (default or ""),
+               "default_type": "formula" if formula is not None else "value"}
+    o = _first_direct(text, parent, "O")
+    if o is not None and default_value(text, o) == desired:
+        return text, "unchanged"
+    if o is None:
+        return append_child(text, parent, snippet), "default-updated"
+    return text[:o.open_start] + snippet + text[o.close_end:], "default-updated"
+
+
+def add_template_parameter(text: str, name: str, default: str = None,
+                           formula: str = None) -> tuple:
     """登记一个模板参数（已存在则只改默认值），返回 (新文本, 动作)。"""
     name = (name or "").strip()
     if not name:
         raise ApiError("模板参数名不能为空")
     exists = [p for p in template_parameters(text) if p["name"] == name]
     if exists:
-        el = exists[0]["default_element"]
-        if el is None or (exists[0]["default"] or "") == (default or ""):
-            return text, "unchanged"
-        return set_text(text, el, default or ""), "default-updated"
+        return set_default_value(text, exists[0]["element"], default, formula)
     snippet = ("<Parameter>\n"
                f'<Attributes name="{_escape_attr(name)}"/>\n'
-               f"<O>\n<![CDATA[{_cdata(default, '参数默认值')}]]></O>\n</Parameter>")
+               f"{default_object_xml(default, formula)}\n</Parameter>")
     parent = parameter_attr_element(text)
     params_el = _first_direct(text, parent, "Parameters")
     if params_el is None:
@@ -2356,51 +2399,6 @@ SQL_PARAM_REF = re.compile(r"\$\{([A-Za-z_][\w.]*)\}")
 SQL_PARAM_BARE = re.compile(r"\$(?!\{)([A-Za-z_]\w*)")
 #: 单元格公式里的 `$x`（排除 `$A1` / `$A$1` 这类单元格绝对引用）
 FORMULA_PARAM_REF = re.compile(r"\$(?![A-Za-z]{1,3}\$?\d)([A-Za-z_]\w*)")
-
-_FORMULA_TAIL_BAD = set("+-*/^&<>=,(|\\")
-
-
-def check_formula(expr: str) -> str:
-    """公式的轻量语法校验（返回补全 `=` 的写法）。
-
-    服务端对坏公式（`=1+`、括号不配对）**不报错**，只是渲染成空白 —— 所以在这里拦。
-    只做「能确定是错的」判定：括号/引号配对、结尾不是运算符，不做语法树解析。
-    """
-    e = (expr or "").strip()
-    if not e:
-        raise ApiError("公式不能为空")
-    if not e.startswith("="):
-        e = "=" + e
-    body = e[1:].strip()
-    if not body:
-        raise ApiError("公式只有 `=`，没有内容")
-    depth, in_str, i = 0, False, 0
-    while i < len(body):
-        ch = body[i]
-        if in_str:
-            if ch == '"':
-                if i + 1 < len(body) and body[i + 1] == '"':     # "" = 转义的双引号
-                    i += 2
-                    continue
-                in_str = False
-        elif ch == '"':
-            in_str = True
-        elif ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth < 0:
-                raise ApiError("公式括号不配对：多了一个 `)`")
-        i += 1
-    if in_str:
-        raise ApiError("公式里的双引号没有闭合")
-    if depth:
-        raise ApiError(f"公式括号不配对：有 {depth} 个 `(` 没闭合")
-    if body[-1] in _FORMULA_TAIL_BAD:
-        raise ApiError(f"公式以 `{body[-1]}` 结尾，写完整再提交"
-                       "（服务端会静默渲染成空白，不报错）")
-    return e
-
 
 def formula_signature(expr: str):
     """公式的（半定量的）静态特征：引用的参数名、是否误写 `${x}`。"""
