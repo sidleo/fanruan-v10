@@ -71,13 +71,13 @@ frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --sh
 两个 `Block`，各自内含 `CellElementList` 和 `PECBAttr`。一次结构检查得到 25 + 154 = 179 格；
 两个区块各有一个 `A1`。`PECBAttr` 的 `blockName`、`x/y/width/height` 定义分别保存于各块。
 注意 `report page/highlight/link/chart --list` 这类基于普通网格的只读命令遇到聚合报表
-也会明确报错（fail closed），请用 `local-inspect` 按块查看。
+未给 `--block` 时会明确报错（fail closed）；可用 `local-inspect` 查看，再明确块操作。
 
 - `--cells` 每行带 `block_index` 和 `block_name`；`--block 2` 的序号是工作表中块的 1 基顺序。
 - `bounds` 为模板中原始坐标值，不应当成全表单元格坐标；未知块类型若无 `CellElementList`，
   `has_cell_list` 为 false，零格仅表示没有识别到该列表。
-- 普通 `report cell/table` 网格命令不能安全处理聚合块；遇到聚合工作表应停止普通网格修改。
-  需要创作或修改聚合报表时使用 Designer，并在目标预览及导出通道验收。
+- 0.11.0 起 `report cell/table` 等网格命令支持 `--sheet S --block N`，行列/区域编辑也必须明确块。
+  非网格块、跨块引用及未知结构不自动处理；覆盖边界见 [结构编辑手册](cpt-structure.md)，效果仍需预览及导出验收。
 
 ## 分栏与浮动元素：先比原始结构，再做效果验证
 
@@ -96,6 +96,7 @@ frcli report local-inspect "<reportlets目录>/demo/basic/聚合报表.cpt" --sh
 `<O t="XMLable" class="com.fr.base.Formula">`；两者都识别为公式。单元格不显式写 `<RG>`
 时的分组默认行为及验证配方见 `cpt-features.md` 与 `cpt-patterns.md`。
 
+`local-inspect` 的 `validation` 返回共享的结构诊断、引用计数和未支持内容。
 结构扫描只说明模板文件写了什么，不证明运行时公式、数据连接、参数联动或导出效果正确。
 复用前先核对数据集、参数与适用版本；验证变化时按 `cpt-patterns2.md` 的验收通道选择方法执行。
 

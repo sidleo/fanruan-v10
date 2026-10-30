@@ -848,4 +848,6 @@ def inspect_template(path, sheet=None, block=None, include_cells=False, limit=10
                        "truncated": result["cell_count"] > len(rows)})
     if include_design:
         result["design"] = _profile_tree(parsed, source.name)
+    from .cptmodel import DocumentIndex
+    result["validation"] = DocumentIndex(text, parsed_root=parsed).report()
     return result

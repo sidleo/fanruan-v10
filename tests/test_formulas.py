@@ -212,6 +212,7 @@ def test_new_write_options_keep_zero_request_scope_guard(args):
 
 
 def test_same_dataset_formula_with_apply_does_not_upload(monkeypatch):
+    monkeypatch.setenv("FRCLI_WRITE_SCOPE", "demo_group/demo_user")
     text, _ = reportops.plan_edit(template(), dataset="ds", param="edate", default_formula=EXPR)
     monkeypatch.setattr(reportops, "read_template", lambda *args: text.encode())
 

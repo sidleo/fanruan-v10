@@ -576,7 +576,7 @@ def install_lock_guard() -> None:
 
 
 def upload_template(config, local_file: str, remote_path: str, force: bool = False,
-                    allow_format: bool = False) -> dict:
+                    allow_format: bool = False, expected_sha256: str = None) -> dict:
     """把本地模板写到服务端（远程设计通道）。
 
     覆盖已有模板时必须 `force=True`；写前先 `readAndLockFile` 占锁（被他人占用会
@@ -608,9 +608,13 @@ def upload_template(config, local_file: str, remote_path: str, force: bool = Fal
             if _tries > 1:
                 result["lock_attempts"] = _tries
             locked = True
-            result["backup"] = _save_backup(remote, current)
-            result["previous_sha256"] = _sha256(current)
         try:
+            if expected_sha256 is not None:
+                if not exists or _sha256(current) != expected_sha256:
+                    raise ApiError("模板在读取后已变化，已取消写入；请重新读取并预览修改")
+            if exists:
+                result["backup"] = _save_backup(remote, current)
+                result["previous_sha256"] = _sha256(current)
             if not exists:
                 parent = remote.rsplit("/", 1)[0] if "/" in remote else ""
                 if parent:

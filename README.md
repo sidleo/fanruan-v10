@@ -2,6 +2,8 @@
 
 `fanruan_v10` 提供与 FineReport V10 决策平台交互的命令行工具 **`frcli`**，以及供 Agent 使用的 **`fanruan-v10` skill**。它把报表查找、参数与 SQL 读取、导出、模板创作、运行时巡检和调度管理封装成命令，输出 JSON、表格或本地文件。
 
+当前发布版本为 **0.11.1**，包含 CPT 结构索引、依赖诊断、行列与区域编辑、本地模板编辑和聚合网格块选择。
+
 CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 skill 入口。目录名保留 `fanruan_v10`，skill 名使用 `fanruan-v10`；协作与修改要求见 [AGENTS.md](AGENTS.md)。
 
 ## 能力与命令入口
@@ -11,7 +13,7 @@ CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 s
 | 命令组 | 主要用途与入口 |
 | --- | --- |
 | `server` | 本地多实例配置：`list`、`add`、`remove`、`set-default`、`test`。 |
-| `report` | 查询模板、参数、数据集和 SQL；`functions/formula-check` 离线函数检索与检查；`preview` 数据集预览、`download` 原始模板、`upload/delete`、工作表与单元格编辑、表格/交叉表/图表/控件创作；`local-*` 离线示例分析。 |
+| `report` | 查询模板、参数、数据集和 SQL；`functions/formula-check` 离线函数检索与检查；`preview` 数据集预览、`download` 原始模板、`upload/delete`、工作表与单元格编辑、表格/交叉表/图表/控件创作；`local-*` 离线示例分析；`validate/refs` 结构诊断、`row/column/range` 引用联动的行列与区域编辑。 |
 | `export` | 导出 `pdf`、`excel`、`word`、`image`、`csv`，或按清单 `batch` 导出。 |
 | `attach` | `upload/remove` 管理服务器附件缓存。 |
 | `system` | 查询 `version`、`health`、`modules`、`authority`、`login-policy`。 |
@@ -21,7 +23,9 @@ CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 s
 | `schedule` | 任务清单、配置、执行记录与日志，以及创建、更新、暂停、恢复、执行和删除。 |
 | `rpc` | 高级远程设计入口：`services`、`methods`、受只读白名单与写范围控制的 `call`。 |
 
-服务端命令需要实例配置和对应权限；模板下载、编辑与数据集预览使用远程设计通道，另需远程设计权限。`report local-examples/local-profile/local-inspect` 和 `rpc services --local`、`rpc methods` 可离线运行。
+服务端命令需要实例配置和对应权限；模板下载、编辑与数据集预览使用远程设计通道，另需远程设计权限。
+`report local-examples/local-profile/local-inspect`、`report functions/formula-check`、`rpc services --local`、
+`rpc methods` 以及带 `--local` 的模板检查、引用查询和编辑均可离线运行。
 
 ## 安装与首次运行
 
@@ -86,7 +90,7 @@ frcli report local-inspect "<reportlets目录>/demo.cpt" --block 2 --cells
 frcli report local-inspect "<reportlets目录>/demo.cpt" --sql          # 数据集 SQL/连接名（离线）
 ```
 
-`local-profile` 汇总原型、技术、图表类型和代表样例，`local-inspect --design` 提供版面与交互画像，`--cells` 显示具体格号，`--sql` 离线解析数据集 SQL 与连接名（大模板比线上 `report datasets` 快）。聚合报表 `PolyWorkSheet` 的各个块拥有独立坐标；普通网格编辑不能直接用于这些聚合块。
+`local-profile` 汇总原型、技术、图表类型和代表样例，`local-inspect --design` 提供版面与交互画像，`--cells` 显示具体格号，`--sql` 离线解析数据集 SQL 与连接名（大模板比线上 `report datasets` 快）。聚合报表 `PolyWorkSheet` 的各个块拥有独立坐标；网格编辑须明确 `--sheet S --block N`；不支持的块或引用语义会阻断。
 
 结构分析需要结合实际渲染和导出验收。操作细节见 [本地示例检查](references/cpt-local-examples.md)，选型与设计方法见 [从示例提炼设计](references/cpt-design-from-examples.md)。
 
@@ -101,8 +105,8 @@ frcli report functions --category hierarchy -f table
 frcli report formula-check '=IF($topn>0,SUM(ds.select(金额)),0)' --param topn
 ```
 
-目录含 180 个内置实现类和 3 个数据集方法的名称、简要用途、签名及来源；未核实的签名
-显式留空。检查支持单双引号、反斜杠转义和括号配对，未知名称按插件/自定义函数提示。
+目录含 180 个内置实现类和 3 个数据集方法，每项提供名称、简要用途、签名及来源类别。
+检查支持单双引号、反斜杠转义和括号配对，未知名称按插件/自定义函数提示。
 检查不执行公式，也不证明当前实例能够正确求值。
 
 动态默认值用显式参数，与静态文本区分，以下均为 dry-run：
@@ -121,7 +125,7 @@ frcli report edit demo_group/demo_user/demo.cpt --dataset ds --param edate \
 占锁、备份和回读校验。`param/widget --list` 的 `default_type` 区分公式与静态值。
 函数语义、来源边界和运行期验收见 [函数与公式](references/formulas.md)。
 
-## 导出与模板创作
+## 导出报表
 
 单次导出示例沿用上面的 `sample_report`，输出在项目根目录的 `out/`：
 
@@ -147,11 +151,61 @@ reports:
 
 保存为 `manifest.yaml` 后执行 `FRCLI_TIMEOUT=600 frcli -i demo export batch manifest.yaml`。列表参数展开为参数矩阵；输出名应覆盖所有变化参数，避免覆盖文件。检查结果中的 `failed`、`errors` 与 `warnings`，批量顶层 `status: ok` 表示流程结束，可能仍有失败条目。
 
+## CPT 结构检查与编辑
+
+日常解析和编辑由 Python CLI 完成，不需要 Designer、Java 或大模型计算坐标。
+先检查结构和依赖，再预览、写入新文件并回读：
+
+```bash
+frcli report validate input.cpt --local
+frcli report refs input.cpt --local --sheet 明细 --at D5
+frcli report column input.cpt --local --sheet 明细 --delete C:E
+frcli report row input.cpt --local --sheet 明细 --insert-before 3 --count 2
+frcli report range input.cpt --local --sheet 明细 --at A1:C5 --move-to E1
+frcli report column input.cpt --local --sheet 明细 --delete C:E --apply -o result.cpt
+frcli report validate result.cpt --local
+frcli report refs result.cpt --local --sheet 明细
+```
+
+| 操作 | 命令与参数 |
+| --- | --- |
+| 结构检查、依赖查询 | `report validate`、`report refs --at A1` |
+| 行列插入、删除、尺寸 | `report row`、`report column`；多段 `--delete` 使用操作前坐标 |
+| 区域复制、移动、清空、合并、拆分、样式 | `report range --at A1:C5` 配合 `--copy-to` / `--move-to` / `--clear` / `--merge` / `--unmerge` / `--style` |
+| sheet 重命名、删除 | `report sheet`；检查并联动已识别的跨 sheet 引用 |
+| 聚合报表网格块 | 支持该块的编辑命令必须明确 `--sheet S --block N`，N 为工作表内块的 1 基序号 |
+
+CLI 同步已识别的坐标、公式、父格、合并、尺寸、条件属性及分页范围。区域复制与移动使用不同的引用规则；
+删除仍被引用的目标、目标区域占用、合并内容归属不明或未知动态结构等冲突会阻止写入，`--apply` 也不能绕过。
+FineReport 的 `$Cell` 不按 Excel 的 `$A$1` 解释；含 `$Cell` 的区域复制尚未确证，会明确阻断。
+
+`--local` 不加载实例配置或联网，默认只预览；`--apply -o NEW.cpt` 写入新文件，不覆盖输入或已有输出。
+检查结果中的 `diagnostics`、`unsupported` 和 `coverage_complete` 分别表示结构诊断、未支持内容与覆盖范围；
+静态检查通过后仍需按目标渠道验证公式值、扩展和导出效果。
+完整语义与限制见 [CPT 结构编辑](references/cpt-structure.md)，对照依据和固定数值验收见
+[结构编辑验证](docs/验证/CPT结构编辑验证.md)。
+
+## 模板创作与分页设置
+
 模板创作支持 `new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link/sheet` 等入口，多数修改命令默认 dry-run，确认差异并获得目标授权后加 `--apply` 才写。已有模板的编辑预览仍可能读取服务器。
 
 写入前设置 `FRCLI_WRITE_SCOPE="demo_group/demo_user/sandbox"` 限定授权目录；未设范围默认拒绝写入。`--any-path` 显式放行单次目标，仍需取得操作授权。覆盖或删除已有模板前先下载备份；写入包含占锁、覆盖备份和回读校验。模板删除移入服务端回收站，目录删除另需 `--recursive`。
 
-模板创作配方与验收要求见 [创作手册](references/cpt-authoring.md)、[配方一](references/cpt-patterns.md) 和 [配方二](references/cpt-patterns2.md)。动态参数默认值、复杂填报控件等场景仍需结合 XML 或 Designer；列名绑定和公式必须按实际渲染结果验证。
+页眉页脚、重复标题行列和冻结均有固定参数，下面是本地预览示例：
+
+```bash
+frcli report page input.cpt --local --repeat-header-rows 0:0 \
+    --header-text 日报 --header-height 20
+frcli report page input.cpt --local --list
+```
+
+`--repeat-header-rows` 等报表级重复范围采用 **0 基闭区间**，`0:0` 是第一行；
+单元格级 `--repeat-rows` / `--no-repeat-rows` 使用 **1 基行号**。
+页眉页脚、页码和重复标题通过 PDF 分页结果验收；冻结通过预览页滚动验收。
+
+模板创作配方与验收要求见 [创作手册](references/cpt-authoring.md)、[配方一](references/cpt-patterns.md) 和 [配方二](references/cpt-patterns2.md)。
+业务指标、信息层级和视觉取舍仍需根据需求设计；复杂填报控件、非网格聚合块、跨块引用及未知插件尚未完整支持。
+列名绑定和公式必须按实际渲染结果验证。
 
 ## 调度与性能排查
 
@@ -214,6 +268,7 @@ fanruan_v10/
 │   ├── neterr.py            # 共用网络错误分类
 │   ├── remotedesign.py      # 远程设计通道与模板读写保护
 │   ├── reportops.py         # 模板修改编排
+│   ├── cptmodel.py / cpttransform.py  # 结构索引、引用与坐标变换
 │   ├── cptxml.py / chartxml.py / local_cpt.py
 │   └── dataset_preview.py / rpc.py / jser.py / rdcrypto.py
 ├── references/              # 安装、启动器、XML、创作配方与协议手册

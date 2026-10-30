@@ -104,13 +104,30 @@ check || exit 1
 echo "—— 打包 ——"
 TMP=$(mktemp -d)
 mkdir -p "$TMP/fanruan-v10"
-for p in SKILL.md README.md AGENTS.md pyproject.toml .gitignore src tests references tools; do
+for p in SKILL.md README.md AGENTS.md pyproject.toml .gitignore src tests references docs tools; do
     [ -e "$p" ] && cp -R "$p" "$TMP/fanruan-v10/"
 done
 mkdir -p dist
 rm -f dist/fanruan-v10.skill
-( cd "$TMP" && zip -qr "$ROOT/dist/fanruan-v10.skill" fanruan-v10 \
-    -x "*/__pycache__/*" "*.pyc" "*.DS_Store" "*/.pytest_cache/*" "*/frcli.egg-info/*" )
+# Python 会为中文等非 ASCII 文件名设置 UTF-8 标志；本机 zip 未标记时，安装器会按 CP437 解出乱码。
+python3 - "$TMP" "$ROOT/dist/fanruan-v10.skill" <<'PY'
+from pathlib import Path
+import sys
+import zipfile
+
+staging = Path(sys.argv[1])
+with zipfile.ZipFile(sys.argv[2], "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    for path in sorted(staging.rglob("*")):
+        relative = path.relative_to(staging)
+        if not path.is_file():
+            continue
+        if any(part in {"__pycache__", ".pytest_cache"} or part.endswith(".egg-info")
+               for part in relative.parts):
+            continue
+        if path.suffix == ".pyc" or path.name == ".DS_Store":
+            continue
+        archive.write(path, relative.as_posix())
+PY
 rm -rf "$TMP"
 
 VER=$(grep -m1 '__version__' src/frcli/__init__.py | cut -d'"' -f2)

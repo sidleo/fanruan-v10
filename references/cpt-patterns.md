@@ -426,15 +426,20 @@ frcli report cell "$R" --at F3 --set-formula '=WEEK(TODATE(D3,"yyyyMMdd"))' --ap
 
 ---
 
-## 7. 分页 / 页眉页脚 / 冻结 / 重复标题行（**含 2 条未确证**）
+## 7. 分页 / 页眉页脚 / 冻结 / 重复标题行
 
 **样例**：`patterns/r7_page.cpt`（80 行多页）、`patterns/r7_wide_freeze.cpt`（16 列宽表）
 
 ```bash
-frcli report page "$R" --list                                   # 读：页眉页脚高度/冻结/页眉页脚内容
-frcli report page "$R" --header-height 30 --footer-height 20 --freeze 1,0 --apply
-frcli report page "$R" --no-repeat-rows 3 --apply               # 第 3 行写 CellPageAttr repeat="false"
+frcli report page "$R" --list                                   # 读：页眉页脚/冻结/重复范围
+frcli report page "$R" --repeat-header-rows 0:0                  # 预览：Excel 第 1 行每页重复
+frcli report page "$R" --header-text 日报 --header-height 30     # 预览：页眉内容与高度
+frcli report page "$R" --footer-height 20 --freeze 1,0           # 预览：页脚高度与冻结
+frcli report page "$R" --no-repeat-rows 3                       # 预览：第 3 行 CellPageAttr repeat="false"
 ```
+
+以上修改默认 dry-run；服务端写入须满足授权与写范围，再加 `--apply`。
+本地文件加 `--local`；写入时使用 `--apply -o NEW.cpt`，随后 `report page NEW.cpt --local --list` 回读。
 
 **XML 契约（都有类/方法出处）**
 
@@ -445,7 +450,7 @@ frcli report page "$R" --no-repeat-rows 3 --apply               # 第 3 行写 C
 <FrozenColumnRow columnrow="1,0"/>                              <!-- 冻结列行 -->
 </ReportSettings>
 <Header reportPageType="0"><Background name="NullBackground"/>
-<LeftList/><CenterList/><RightList/></Header>                    <!-- 页眉内容容器（语料全是空） -->
+<LeftList/><CenterList/><RightList/></Header>                    <!-- 页眉内容容器；文字/公式由 CLI 写入 -->
 <Footer reportPageType="0">…</Footer>
 </ReportAttrSet>
 ```
@@ -456,25 +461,18 @@ frcli report page "$R" --no-repeat-rows 3 --apply               # 第 3 行写 C
   `pageAfterColumn/pageAfterRow/pageBeforeColumn/pageBeforeRow/repeat/breakOnPaginate`；
   **字段初值 63（全位）⇒ `repeat` 缺省就是 true，`writeXML` 只在 `!isRepeat()` 时写 `repeat="false"`**。
 
-**实测（都是这一轮真跑的）**
+**设置与验收边界**
 
-| 项 | 结果 |
-|---|---|
-| `--header-height/--footer-height/--freeze` 写入 + 回读 | ✅ `report page --list` 读回 `30.0 / 12.0 / "1,0"` |
-| PDF 产物是否受影响 | ✅ 有（`w_frozen.pdf` 43874B vs `w_plain.pdf` 41762B；均 4 页） |
-| PDF **文本坐标**是否变化 | ❌ 没有（两份 PDF 文本项 48 个、x 坐标分布完全一致）⇒ **冻结列是否"每页重复"未确证** |
-| `report image` 是否体现页眉高度/冻结 | ❌ 两次出图**逐字节相同**（image 通道忽略这两项） |
-| 80 行报表默认是否重复表头 | ❌ **不重复**：image 里第 1 页到 C53 结束，第 2 页从 C54 直接开始，表头只出现一次 |
-| `repeat="false"` 与不写的差异 | ❌ image 产物逐字节相同 ⇒ **`repeat` 不是"每页重复标题行"的开关** |
+- 每页重复标题使用报表级 `<ReportPageAttr>` 的 `HR/FR/HC/FC`，起止范围为 **0 基闭区间**。
+  `--repeat-header-rows 0:0` 表示 Excel 第 1 行；单元格级 `CellPageAttr repeat` 使用 **1 基行号**，
+  控制的是单元格分页属性，不能代替报表级重复标题范围。
+- 页眉页脚可用 `--header-text` / `--footer-text` 写文字，配合
+  `--header-formula` / `--footer-formula` 写公式；高度参数单位是磅。
+- 页眉页脚、页码和重复标题须检查 PDF 的实际分页结果；`report image` 输出版面流，不能作为这类设置的验收结果。
+  冻结行列通过结构回读和预览页滚动验收；需要每页重复左侧列时使用 `--repeat-header-cols`。
+- 单元格分页控制 `pageBeforeRow/pageAfterRow` 的写入尚未暴露为命令参数；`report page --list` 可读回。
 
-**结论（诚实版）**
-- "每页重复标题行"在本版本**没找到生效的模板级写法**：语料 1602 个 .cpt 里 `repeat*` 属性 **0 处**，
-  实测默认也不重复。要重复表头，现实的路线是把表头做进**页眉**（`<Header>` 的
-  `LeftList/CenterList/RightList`）——**未确证**（本 CLI 只读该节点，不做写入）。
-- 冻结列（`FrozenColumnRow`）**能写、能回读、PDF 产物有变化**，但"跨页重复左列"的效果
-  **未确证**（缺 PDF 文本提取工具；实测环境无 `pdftotext`/`pypdf`）。
-  复现实验的命令都在本节，谁有 PDF 文本工具可以接着判。
-- 单元格分页控制 `pageBeforeRow/pageAfterRow` 的**写入**本 CLI 暂未暴露（`report page --list` 会读出来）。
+完整命令、XML 和重复标题的 PDF 对照案例见 [第二辑 W5](cpt-patterns2.md#w5-分页--重复标题行--页眉页脚页码--冻结)。
 
 ---
 

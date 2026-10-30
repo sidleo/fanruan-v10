@@ -737,9 +737,7 @@ def test_plan_table_widths_count_must_match():
     import pytest
     from frcli import reportops
     from frcli.exceptions import ApiError
-    text = reportops.cptxml.new_template() if hasattr(reportops.cptxml, "new_template") else None
-    if text is None:
-        pytest.skip("骨架构造函数名不同，跳过")
+    text = reportops.cptxml.empty_skeleton()
     with pytest.raises(ApiError):
         reportops.plan_table(text, "ds1", "A1", ["a", "b"], widths=[10])
 

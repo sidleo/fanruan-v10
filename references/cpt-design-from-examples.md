@@ -331,8 +331,10 @@ FineReport 安装版本的样例目录可能不同；路径存在时，可按下
 | 钻取、网页链接、JavaScript | `report link` |
 | 重复标题、页脚页码、冻结、分页 | `report page` |
 
-聚合报表可以离线检查和提炼，但普通 `report cell/table` 网格命令不支持其独立 Block 修改；
-实施时应在支持聚合块的目标工具中完成，再按相同验收清单检查。
+聚合报表的各个 Block 使用独立坐标。frcli ≥ 0.11.0 可对已支持的网格块执行编辑：
+先用 `report local-inspect TEMPLATE.cpt --cells` 确认块序号与类型，再明确 `--sheet S --block N`
+（N 为工作表内块的 1 基序号）。支持命令见 [本地示例检查](cpt-local-examples.md#聚合报表每个区块都有自己的网格)；
+非网格块、跨块引用及未知结构的处理边界见 [结构编辑手册](cpt-structure.md)。结构修改后仍按目标渠道验收。
 
 ## 11. 验收顺序
 

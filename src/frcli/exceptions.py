@@ -55,3 +55,13 @@ class ApiError(FrcliError):
 class InspectionError(FrcliError):
     """运行时巡检（模板性能分析）失败：插件未启用、模板没跑起来、结果等待超时等"""
     code = "INSPECTION_ERROR"
+
+
+class TemplateValidationError(FrcliError):
+    """模板结构或引用存在不能安全自动处理的问题。"""
+
+    code = "TEMPLATE_VALIDATION_ERROR"
+
+    def __init__(self, message, diagnostics, **details):
+        super().__init__(message)
+        self.details = {"can_apply": False, "diagnostics": diagnostics, **details}

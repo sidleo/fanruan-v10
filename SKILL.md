@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.10.26
+  version: 0.11.1
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -34,6 +34,14 @@ metadata:
 不适合：**画复杂版面**（图表控件、填报控件、复杂表头嵌套、决策报表 .frm 的组件布局）——
 这些仍然建议在 Designer 里做。本 CLI 能做的是「单元格网格 + 数据集绑定 + 扩展 + 样式 + 参数」
 这一层，覆盖绝大多数**取数类报表**。
+
+### CPT 结构检查与行列编辑（0.11.0 起）
+
+删除/插入行列、区域复制移动和设计前先读 **`references/cpt-structure.md`**。
+用 `report validate/refs` 检查和定位依赖，再用 `report row/column/range` 的 dry-run 预览；
+不要让 Agent 手算坐标或全篇替换列字母。可确定的结构和引用由 CLI 联动，歧义明确阻断。
+模板编辑命令均支持 `--local`；本地执行使用 `--apply -o NEW.cpt`，不读实例或联网。
+聚合 CPT 的网格操作使用 `--sheet S --block N`，每块独立坐标。
 
 ## 2. 前置条件
 
@@ -71,6 +79,13 @@ frcli [--version] [-i INSTANCE] [-v]
 │   │                                          离线函数目录：名称/签名/用途/来源，不执行公式
 │   ├── formula-check EXPR [--context cell|parameter|widget] [--param NAME …]
 │   │                                          离线基础语法检查，未知/插件函数只提示
+│   ├── validate TARGET [--local] [--sheet S] [--block N]   结构、依赖和覆盖检查，不执行模板
+│   ├── refs TARGET [--local] [--sheet S] [--block N] [--at A1]   引用/被引用关系
+│   ├── row TARGET --delete 3:5 … | --insert-before 3 [--count N] | --at 3:5 --height N|--hide
+│   ├── column TARGET --delete C:E … | --insert-before C [--count N] | --at C:E --width N|--hide
+│   ├── range TARGET --at A1:C5 --copy-to E1|--move-to E1|--clear|--merge|--unmerge|--style N
+│   │           [--local] [--sheet S] [--block N] [--apply] [-o NEW.cpt] [--any-path]
+│   │           新增及现有模板编辑命令均支持 --local；默认 dry-run；详见 cpt-structure.md
 │   ├── local-examples DIRECTORY [--keyword K] [--contains TEXT] [-n 30]  离线查找本地 CPT
 │   ├── local-profile DIRECTORY [--keyword K] [--contains TEXT] [--tag T] [-n 20]
 │   │                                                                     批量画像：原型/技术/图表/代表样例
@@ -216,12 +231,13 @@ demo_group/demo_user/dept_a/dept_b/sales_daily.cpt
 
 | 等级 | 命令 | 说明 |
 |------|------|------|
-| 🟢 只读 | `server list/test`、`report local-examples/local-profile/local-inspect/list/info/paras/datasets/preview/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
+| 🟢 只读 | `report validate/refs`、`server list/test`、`report local-examples/local-profile/local-inspect/list/info/paras/datasets/preview/download/serverdatasets/columns/authed/fonts/versions/image`、`report cell --list`、`report dataset --list`、`report param --list`、`report style --list`、`report highlight --list`、`report page --list`、`report chart --list`、`report widget --list`、`report link --list`、`schedule list/tasks/get/exists/executing/history/record/records/log/setting`、`system *`、`entry *`、`user *` | 直接执行 |
 | 🟡 计算 | `export *`、`export batch` | 数据只读，但服务端真实跑报表（复杂报表 50s+，批量可达数十分钟）；批量前说明规模 |
 | 🟠 本地写 | `server add/remove/set-default` | 只改实测环境 `~/.frcli/config.yaml` 与 token 缓存 |
 | 🧱 写范围（**默认拒绝**） | 环境变量 `FRCLI_WRITE_SCOPE=<目录>`，或命令行 `--any-path` | **没设范围又没 `--any-path` → 写命令直接拒绝**（沉默 ≠ 不限制）。设了范围则 `report upload/delete/edit/new/cell/dataset/param/style/table --apply`/`rpc` 写调用只允许落在该目录下，含 `..` 穿越、兄弟目录（`<scope>.tmp`、`<scope>x`）一律拦截 |
 | 🟠 服务端写（轻） | `attach upload/remove` | 只往**服务器附件缓存**写/删文件，不碰报表目录与调度；upload 会在服务端留文件，用完 `remove` 清理 |
 | 🔴 危险 | `schedule create/update/delete/run/pause/resume` | 直接改/跑**生产调度**：`run` 会立刻执行并推送下游（飞书/FTP/邮件），`delete` 不可逆；`pause/resume` 改变任务启用状态（影响后续定时触发），`update --template` 改任务指向的模板 —— 都先备份 `schedule get` 并向用户确认影响范围 |
+| 🔴 危险 | `report row/column/range --apply`（远端） | 会改变模板结构和后续计算；执行前必须确认目标模板及影响范围，先审阅 dry-run。沿用写范围、占锁、覆盖备份、快照复核和回读校验。歧义引用不能强制绕过；`--local` 只写指定新文件 |
 | 🔴 危险 | `report upload` / `report delete` | 直接改**生产模板文件**：影响所有看这张报表的人。upload 覆盖需 `--force`（自动备份原文件）；delete 移入回收站可恢复，但需 `--force`；**目标是目录时必须再加 `--recursive`**（不加直接拒绝） |
 | 🟠 服务端写（模板创作） | `report new` / `cell` / `dataset` / `param` / `style` / `table`（**默认 dry-run，`--apply` 才写**） | 与 `report edit --apply` 同一道写范围守门 + 占锁 + 备份 + 回读 SHA256；新建/改动只应落在你被授权的目录 |
 
@@ -800,16 +816,31 @@ frcli report table "$R" --sheet 明细表 --dataset ds1 --at A2 --columns code,c
 - **条件属性隐藏整行** = `--rule 'v<100:rowheight=0'`（服务端 `RowHeight` 行高 0），
   导出 xlsx 里那一行**整行消失**（不是行高变 0），抄官方 `doc/Primary/DetailReport/条件属性实现折叠树.cpt`。
 
-### 6.17 分页/重复标题行的实测边界（别照直觉写文档）
+### 6.17 分页、重复标题与页眉页脚
 
-- `report page` 能写**页眉页脚高度**（`ReportSettings headerHeight/footerHeight`，FU 单位）与**冻结列**
-  （`<FrozenColumnRow columnrow="列,行"/>`）；PDF 产物确实随之变化（43874B vs 41762B），
-  但**文本坐标逐项相同** ⇒ "冻结列每页重复"**未确证**；`report image` 通道**完全忽略**这两项（两次出图逐字节相同）。
-- **"每页重复标题行"在本版本没找到生效写法**：1602 个官方 .cpt 里 `repeat*` 属性 0 处；
-  80 行报表实测默认**不重复**表头，加 `CellPageAttr repeat="false"` 后产物逐字节相同
-  ⇒ `repeat` 不是这个开关。要重复表头，现实路线是把表头做进 `<Header>`（**未确证**，CLI 只读该节点）。
-- `CellPageAttr` 的 `repeat` **缺省是 true**（服务端字段初值 63 全位，`writeXML` 只在 false 时写属性）——
-  "标签不在 ≠ 设置没有"的又一例；但上面实测说明它不影响分页重复行为。
+- **每页重复标题行**用 `report page --repeat-header-rows 起始:结束`，写入
+  `<ReportPageAttr><HR F="起始" T="结束"/></ReportPageAttr>`。范围是 **0 基闭区间**，
+  `0:0` 表示 Excel 第 1 行；表尾行、标题列和表尾列分别用
+  `--repeat-footer-rows`、`--repeat-header-cols`、`--repeat-footer-cols`，范围记法相同。
+- **页眉页脚内容可写**：`--header-text` / `--footer-text`；公式配合
+  `--header-formula` / `--footer-formula`，页码变量为 `$$page_number` / `$$totalPage_number`。
+  高度用 `--header-height` / `--footer-height`，单位是磅。
+- `--repeat-rows` / `--no-repeat-rows` 修改单元格级 `CellPageAttr repeat`，使用 **1 基行号**，
+  与报表级重复标题范围分开。该属性缺省为 true，不能据此判断是否配置了每页重复表头。
+- `--freeze 列数,行数` 与 `--page-freeze on|off` 用于预览态冻结；在预览页滚动验收。
+  页眉页脚、页码和重复标题通过 **PDF 分页结果**验收，`report image` 不能代替这一检查。
+
+```bash
+# 本地预览：第 1 行每页重复，并写页眉
+frcli report page input.cpt --local --repeat-header-rows 0:0 \
+  --header-text 日报 --header-height 20
+# 写入新文件，再回读设置
+frcli report page input.cpt --local --repeat-header-rows 0:0 \
+  --header-text 日报 --header-height 20 --apply -o output.cpt
+frcli report page output.cpt --local --list
+```
+
+完整配方、XML 与验收案例见 [配方二 W5](references/cpt-patterns2.md#w5-分页--重复标题行--页眉页脚页码--冻结)。
 
 
 ### 6.19b 批量导出支持「参数矩阵」（一个模板 × 多组参数 → 多份文件）
@@ -1142,7 +1173,9 @@ frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql
 `report edit "<模板>" --list`（读模板字节）也很快。不要反复调大 `FRCLI_TIMEOUT` 重试或据此判定平台不可用。
 
 `PolyWorkSheet` 的 `Block` 有各自的单元格和坐标，两个块都可以有 `A1`；普通 `report cell/table`
-网格操作不支持它，不再把它误报为零格。远端模板需先 `report download` 到本地再检查。
+网格命令在未明确块时拒绝操作，避免误报为零格。0.11.0 起 `cell/table/crosstab/highlight/page/chart/link`
+可用 `--sheet S --block N` 操作已支持的网格块，`row/column/range` 也按块执行。
+跨块引用、非网格块及未覆盖结构明确拒绝。远端模板可先 `report download` 到本地检查。
 示例的结构只证明 XML 写法；渲染、交互和导出效果仍需在合适的环境验证。
 检索和聚合块细节见 `references/cpt-local-examples.md`；设计选型、视觉、交互、渠道和验收规则见
 `references/cpt-design-from-examples.md`。
@@ -1186,7 +1219,7 @@ frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql
 | 现象 | 处理 |
 |------|------|
 | `frcli: command not found` | 按 `references/install.md` 自举：`python <base>/references/run.py <命令>` 或 `cd <base>/src && python -m frcli <命令>`（零安装） |
-| `这是聚合报表（PolyWorkSheet）` | 普通网格命令不支持聚合块；先下载原始模板，再用 `report local-inspect ... --cells` 按块检查（§6.29） |
+| `这是聚合报表（PolyWorkSheet）` | 先用 `report local-inspect TEMPLATE.cpt --cells` 确认块序号与类型；0.11.0 起支持网格块的编辑命令须明确 `--sheet S --block N`（N 为 1 基序号）。支持命令及非网格块、跨块引用等边界见 §6.29 与 [结构编辑手册](references/cpt-structure.md) |
 | `导出产物魔数不符` / `导出被服务端排队` | 服务端返回的是出错页或 `Dec-Waiting_In_Line` 排队页；重试一次通常即成功，批量要降并发（§6.1） |
 | `读取报表数据集 xxx失败: 错误代码:11300001 数据集 [y] 配置错误…` | 该模板里有坏数据集，平台原文已给出**坏数据集名 + SQL 报错**；这是报表本身的问题，不是 CLI 故障（§6.5） |
 | 导出 `status: ok` 但文件打不开 | 内容其实是 HTML 出错页面：核对魔数，报错里已带平台原文的 `detail-message`（§6.1） |

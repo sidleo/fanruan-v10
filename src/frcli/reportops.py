@@ -16,6 +16,7 @@ import datetime
 import difflib
 import os
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import chartxml, cptxml, formulas
@@ -27,6 +28,53 @@ from .remotedesign import (RemoteDesignSession, _unwrap_value, assert_in_write_s
 FONT_CHECKER = "com.fr.workspace.server.check.TemplateChecker"
 VCS = "com.fr.workspace.server.vcs.VcsOperator"
 EXPORTER = "com.fr.workspace.server.exporter.TemplateExportOperator"
+
+
+@dataclass
+class LocalTemplate:
+    """显式的离线目标，不含实例、凭据或网络客户端。"""
+
+    path: str
+    output: str = None
+
+
+def _target_path(config, path):
+    return str(Path(config.path).expanduser().resolve()) if isinstance(config, LocalTemplate) else to_workspace_path(path)
+
+
+def _local_commit(config, before_text, new_text, result, apply):
+    if not apply or before_text == new_text:
+        return result
+    if not config.output:
+        raise ApiError("本地 --apply 必须给 -o RESULT.cpt，写入新文件")
+    source = Path(config.path).expanduser().resolve()
+    raw_output = Path(config.output).expanduser()
+    output = raw_output.resolve()
+    if output == source and source.exists():
+        raise ApiError("本地编辑不能覆盖源模板，请给不同的 -o 路径")
+    if raw_output.is_symlink() or output.exists():
+        raise ApiError("本地输出已存在，拒绝覆盖，请使用新的 -o 路径")
+    if before_text and (not source.exists() or source.read_bytes() != before_text.encode("utf-8")):
+        raise ApiError("源模板在读取后已变化，已取消本地写入")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix=".frcli-", suffix=".cpt", dir=output.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(new_text.encode("utf-8"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        # link 是原子的不覆盖创建；不会把并发产生的输出文件替换掉。
+        os.link(name, output)
+    except FileExistsError as exc:
+        raise ApiError("本地输出已被其他操作创建，拒绝覆盖") from exc
+    finally:
+        Path(name).unlink(missing_ok=True)
+    verified = output.read_bytes() == new_text.encode("utf-8")
+    if not verified:
+        raise ApiError("本地写后回读不一致")
+    result.update({"applied": True, "local": str(output), "upload": {"verified": True},
+                   "sha256": _sha(output.read_bytes())})
+    return result
 
 
 def to_display_path(path: str) -> str:
@@ -137,7 +185,15 @@ def read_template(config, report_path: str) -> bytes:
     ⚠️ 不要用 `GET /decision/view/report?format=cpt`：那返回的是数据集定义提取物
     （根元素 `<TableDataMap>`），不是模板字节；照它改完写回去会毁模板。
     """
-    remote = to_workspace_path(report_path)
+    if isinstance(config, LocalTemplate):
+        try:
+            data = Path(config.path).expanduser().read_bytes()
+            from .cptmodel import DocumentIndex
+            DocumentIndex(data.decode("utf-8"))
+            return data
+        except (OSError, UnicodeError) as exc:
+            raise ApiError(f"无法读取 UTF-8 本地 CPT: {exc}") from exc
+    remote = _target_path(config, report_path)
     with RemoteDesignSession(config) as s:
         s.check()
         if not s.exist(remote):
@@ -242,38 +298,12 @@ def plan_edit(text: str, dataset: str = None, sql: str = None, sql_file: str = N
 
 def edit_template(config, report_path: str, apply: bool = False, **kwargs) -> dict:
     """拉模板 → 结构化改 → （--apply 时）上传 + 回读校验。默认只 dry-run。"""
-    remote = to_workspace_path(report_path)
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     data = read_template(config, report_path)
     text = data.decode("utf-8")
     new_text, changes = plan_edit(text, **kwargs)
-    result = {
-        "action": "edit",
-        "remote": remote,
-        "applied": False,
-        "bytes_before": len(data),
-        "bytes_after": len(new_text.encode("utf-8")),
-        "changed": text != new_text,
-        "changes": changes,
-    }
-    if not apply:
-        result["dry_run"] = True
-        result["hint"] = "以上为 dry-run，未写服务端；确认无误加 --apply"
-        return result
-
-    if text == new_text:
-        result.update({"dry_run": False, "note": "内容无变化，未发起写请求"})
-        return result
-
-    assert_in_write_scope(remote)          # 与 upload/delete 同一道守门
-    assert_template_bytes(new_text.encode("utf-8"))
-    tmp = Path(tempfile.mkstemp(prefix="frcli-edit-", suffix=".cpt")[1])
-    try:
-        tmp.write_bytes(new_text.encode("utf-8"))
-        up = upload_template(config, str(tmp), remote, force=True)
-    finally:
-        tmp.unlink(missing_ok=True)
-    result.update({"applied": True, "dry_run": False, "upload": up})
-    return result
+    return commit(config, report_path, text, new_text, "edit", changes, apply=apply)
 
 
 def _text_diff(before: str, after: str, label: str) -> str:
@@ -314,7 +344,7 @@ def template_summary(config, report_path: str) -> dict:
     """`--list`：从**真实模板字节**列出数据集/连接/参数/SQL 里的 `${}` 引用。"""
     data = read_template(config, report_path)
     info = cptxml.summarize(data.decode("utf-8"))
-    info.update({"action": "edit-list", "report": to_workspace_path(report_path),
+    info.update({"action": "edit-list", "report": _target_path(config, report_path),
                  "sha256_before": _sha(data)})
     return info
 
@@ -354,7 +384,11 @@ def commit(config, report_path: str, before_text: str, new_text: str, action: st
 
     写路径与 `report edit` 完全一致：占锁 → 备份 → 写 → 回读 SHA256 比对。
     """
-    remote = to_workspace_path(report_path)
+    from .cptmodel import DocumentIndex, assert_valid
+    index = DocumentIndex(new_text)
+    assert_valid(index)
+    validation = index.report()
+    remote = _target_path(config, report_path)
     result = {
         "action": action,
         "remote": remote,
@@ -364,6 +398,7 @@ def commit(config, report_path: str, before_text: str, new_text: str, action: st
         "bytes_after": len(new_text.encode("utf-8")),
         "changes": changes,
         "diff": diff_text(before_text or "", new_text, os.path.basename(remote)),
+        **validation,
     }
     if extra:
         result.update(extra)
@@ -379,13 +414,16 @@ def commit(config, report_path: str, before_text: str, new_text: str, action: st
         result["applied"] = False
         result["dry_run"] = False
         return result
+    if isinstance(config, LocalTemplate):
+        return _local_commit(config, before_text or "", new_text, result, apply)
     _scope(remote)                                  # 双保险：网络调用前先判定
     data = new_text.encode("utf-8")
     assert_template_bytes(data)                     # 根元素必须是 <WorkBook>
     tmp = Path(tempfile.mkstemp(prefix="frcli-new-", suffix=".cpt")[1])
     try:
         tmp.write_bytes(data)
-        up = upload_template(config, str(tmp), remote, force=force)
+        optimistic = {"expected_sha256": _sha((before_text or "").encode("utf-8"))} if before_text else {}
+        up = upload_template(config, str(tmp), remote, force=force, **optimistic)
     finally:
         tmp.unlink(missing_ok=True)
     result.update({"applied": True, "dry_run": False, "upload": up})
@@ -417,14 +455,20 @@ def new_template(config, report_path: str, sheet: str = None, from_path: str = N
 
     目标已存在时**默认拒绝**（`force=False` 会走到 `upload_template` 的覆盖守门），
     要覆盖得显式 `--force` —— 否则一次手滑就把别人的模板换成空骨架。"""
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     from_text = None
     if from_path:
+        if isinstance(config, LocalTemplate):
+            from_path = str(Path(from_path).expanduser())
+            if not Path(from_path).is_file():
+                raise ApiError("--local 的 --from 必须是存在的本地模板文件")
         if os.path.isfile(from_path):
             from_text = Path(from_path).read_text(encoding="utf-8")
         else:
             from_text = read_template(config, from_path).decode("utf-8")
     new_text = build_template(sheet=sheet, from_text=from_text, template_id=template_id)
-    if output:
+    if output and not isinstance(config, LocalTemplate):
         p = Path(output)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(new_text, encoding="utf-8")
@@ -432,7 +476,7 @@ def new_template(config, report_path: str, sheet: str = None, from_path: str = N
         {"kind": "template.create", "sheet": sheet or "sheet1",
          "from": from_path or "(内置骨架)", "bytes": len(new_text.encode("utf-8"))}],
         apply=apply, force=force)
-    if output:
+    if output and not isinstance(config, LocalTemplate):
         result["local"] = str(Path(output).resolve())
     return result
 
@@ -697,7 +741,7 @@ def template_cells(config, report_path: str, sheet: str = None) -> dict:
     counts = {}
     for row in rows:
         counts[row["kind"]] = counts.get(row["kind"], 0) + 1
-    return {"action": "cell-list", "report": to_workspace_path(report_path),
+    return {"action": "cell-list", "report": _target_path(config, report_path),
             "sheet": sheet or (cptxml.sheet_names(text) or [""])[0],
             "sheets": cptxml.sheet_names(text),
             "count": len(rows), "kinds": counts, "cells": rows,
@@ -707,6 +751,8 @@ def template_cells(config, report_path: str, sheet: str = None) -> dict:
 
 def edit_cell(config, report_path: str, apply: bool = False, sheet: str = None, **kwargs) -> dict:
     """`report cell`（写）：拉模板 → 改一格 → dry-run diff / --apply 写回。"""
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_cell(text, sheet=sheet, **kwargs)
     return commit(config, report_path, text, new_text, "cell", changes, apply=apply)
@@ -851,6 +897,8 @@ def _replace_sql(text, target, new_sql, changes):
 
 
 def edit_dataset(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_dataset(text, **kwargs)
     return commit(config, report_path, text, new_text, "dataset", changes, apply=apply)
@@ -860,7 +908,7 @@ def template_datasets(config, report_path: str, sql: bool = False) -> dict:
     """`report dataset --list`：从**模板字节**读数据集（不是 `format=cpt` 提取物）。"""
     text = read_template(config, report_path).decode("utf-8")
     tds = cptxml.table_datas(text)
-    return {"action": "dataset-list", "report": to_workspace_path(report_path),
+    return {"action": "dataset-list", "report": _target_path(config, report_path),
             "count": len(tds), "datasets": [
                 {"name": t["name"], "class": t["class"].rsplit(".", 1)[-1],
                  "connection": t["connection"],
@@ -913,6 +961,8 @@ def plan_param(text: str, add=(), remove=(), set_default=(), set_formula=()):
 
 
 def edit_param(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_param(text, **kwargs)
     return commit(config, report_path, text, new_text, "param", changes, apply=apply)
@@ -921,7 +971,7 @@ def edit_param(config, report_path: str, apply: bool = False, **kwargs) -> dict:
 def template_params(config, report_path: str) -> dict:
     text = read_template(config, report_path).decode("utf-8")
     params = cptxml.template_parameters(text)
-    return {"action": "param-list", "report": to_workspace_path(report_path),
+    return {"action": "param-list", "report": _target_path(config, report_path),
             "count": len(params),
             "parameters": [{k: p[k] for k in ("name", "default", "default_type")} for p in params],
             "datasets": cptxml.dataset_names(text),
@@ -958,6 +1008,8 @@ def plan_style_preset(text: str, fmt: str = None, bold: bool = False, bg: str = 
 
 
 def edit_style(config, report_path: str, apply: bool = False, preset=False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = (plan_style_preset(text, **kwargs) if preset
                          else plan_style(text, **kwargs))
@@ -975,16 +1027,20 @@ def plan_sheet(text: str, action: str, name: str = None, new_name: str = None,
         return text, [{"kind": "sheet.add", "name": added, "clone_from": clone_from or before[0],
                        "sheets": cptxml.sheet_names(text)}]
     if action == "rename":
-        text = cptxml.rename_sheet(text, name, new_name)
+        from .cpttransform import plan_sheet as transform_sheet
+        text, _changes, _validation = transform_sheet(text, name, new_name=new_name)
         return text, [{"kind": "sheet.rename", "from": name, "to": new_name,
                        "sheets": cptxml.sheet_names(text)}]
     if action == "remove":
-        text = cptxml.remove_sheet(text, name)
+        from .cpttransform import plan_sheet as transform_sheet
+        text, _changes, _validation = transform_sheet(text, name, remove=True)
         return text, [{"kind": "sheet.remove", "name": name, "sheets": cptxml.sheet_names(text)}]
     raise ApiError(f"不认识的 sheet 操作 {action!r}")
 
 
 def edit_sheet(config, report_path: str, apply: bool = False, action: str = None, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_sheet(text, action, **kwargs)
     return commit(config, report_path, text, new_text, "sheet", changes, apply=apply)
@@ -993,7 +1049,7 @@ def edit_sheet(config, report_path: str, apply: bool = False, action: str = None
 def template_styles(config, report_path: str) -> dict:
     text = read_template(config, report_path).decode("utf-8")
     items = cptxml.styles(text)
-    return {"action": "style-list", "report": to_workspace_path(report_path),
+    return {"action": "style-list", "report": _target_path(config, report_path),
             "count": len(items),
             "styles": [{k: v for k, v in s.items() if k != "xml"} for s in items],
             "note": "单元格 `s=\"n\"` 引用的就是这个列表的第 n 个（0 起）"}
@@ -1108,6 +1164,8 @@ def plan_table(text: str, dataset: str, at: str, columns, header: bool = False,
 
 
 def edit_table(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_table(text, **kwargs)
     return commit(config, report_path, text, new_text, "table", changes, apply=apply)
@@ -1195,6 +1253,8 @@ def plan_highlight(text: str, at: str, sheet: str = None, rules=(), clear: bool 
 
 
 def edit_highlight(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_highlight(text, **kwargs)
     return commit(config, report_path, text, new_text, "highlight", changes, apply=apply)
@@ -1219,7 +1279,7 @@ def template_highlights(config, report_path: str, at: str = None, sheet: str = N
                                     "then": [cptxml.highlight_action_spec(a)
                                              for a in h["actions"]]}
                                    for h in cell["highlights"]]})
-    return {"action": "highlight-list", "report": to_workspace_path(report_path),
+    return {"action": "highlight-list", "report": _target_path(config, report_path),
             "sheet": sheet or (cptxml.sheet_names(text) or [""])[0],
             "count": len(out), "cells": out}
 
@@ -1271,6 +1331,8 @@ def plan_widget(text: str, param: str, kind: str = "combo", options=(), default:
 
 
 def edit_widget(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_widget(text, **kwargs)
     return commit(config, report_path, text, new_text, "widget", changes, apply=apply)
@@ -1279,7 +1341,7 @@ def edit_widget(config, report_path: str, apply: bool = False, **kwargs) -> dict
 def template_widgets(config, report_path: str) -> dict:
     """`report widget --list`：列出参数面板控件。"""
     text = read_template(config, report_path).decode("utf-8")
-    return {"action": "widget-list", "report": to_workspace_path(report_path),
+    return {"action": "widget-list", "report": _target_path(config, report_path),
             "has_panel": cptxml.panel_element(text) is not None,
             "count": len(cptxml.panel_widgets(text)),
             "widgets": cptxml.panel_widgets(text),
@@ -1353,6 +1415,8 @@ def plan_link(text: str, at: str, to: str = None, kind: str = "reportlet", param
 
 
 def edit_link(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_link(text, **kwargs)
     return commit(config, report_path, text, new_text, "link", changes, apply=apply)
@@ -1369,7 +1433,7 @@ def template_links(config, report_path: str, at: str = None, sheet: str = None) 
             continue
         out.append({"at": cell["a1"], "value": cell.get("text"), "binding": cell.get("binding"),
                     "links": cell["links"]})
-    return {"action": "link-list", "report": to_workspace_path(report_path),
+    return {"action": "link-list", "report": _target_path(config, report_path),
             "sheet": sheet or (cptxml.sheet_names(text) or [""])[0],
             "count": len(out), "cells": out}
 
@@ -1414,6 +1478,8 @@ def plan_chart(text: str, at: str, dataset: str, kind: str = "column", category:
 
 
 def edit_chart(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_chart(text, **kwargs)
     return commit(config, report_path, text, new_text, "chart", changes, apply=apply)
@@ -1431,7 +1497,7 @@ def template_charts(config, report_path: str, sheet: str = None) -> dict:
         out.append({"at": cell["a1"],
                     "type": chartxml.detect_type(raw),
                     "definition": chartxml.parse_definition(raw)})
-    return {"action": "chart-list", "report": to_workspace_path(report_path),
+    return {"action": "chart-list", "report": _target_path(config, report_path),
             "sheet": sheet or (cptxml.sheet_names(text) or [""])[0],
             "count": len(out), "charts": out}
 
@@ -1489,15 +1555,19 @@ def plan_page(text: str, sheet: str = None, header_height: float = None,
         changes.append({"kind": "page.repeat", "rows": rows, "repeat": flag, "cells": hit})
     if not changes:
         raise ApiError("没有给任何分页动作（--header-height / --footer-height / --freeze / "
-                       "--repeat-rows / --no-repeat-rows）")
+                       "--repeat-rows / --no-repeat-rows / --repeat-header-rows / "
+                       "--header-text / --footer-text / --page-freeze 等）")
     changes.append({"kind": "note",
                     "message": "`<CellPageAttr repeat>` **缺省就是 true**（服务端字段初值 63 全位）："
                                "「没写」= 允许重复，只有 `repeat=\"false\"` 才是关闭；"
-                               "页眉页脚内容在 <Header>/<Footer>（本 CLI 只读）"})
+                               "每页重复标题用 --repeat-header-rows/--repeat-header-cols（0 基闭区间）；"
+                               "页眉页脚内容用 --header-text/--footer-text 写入"})
     return text, changes
 
 
 def edit_page(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_page(text, **kwargs)
     return commit(config, report_path, text, new_text, "page", changes, apply=apply)
@@ -1512,7 +1582,7 @@ def template_page(config, report_path: str, sheet: str = None) -> dict:
         spec = cptxml.cell_page_attr_spec(text, cell)
         if spec.get("present") or not spec.get("repeat", True):
             rows.setdefault(cell["r"] + 1, []).append(spec)
-    return {"action": "page-list", "report": to_workspace_path(report_path),
+    return {"action": "page-list", "report": _target_path(config, report_path),
             "sheet": sheet or (cptxml.sheet_names(text) or [""])[0],
             "settings": info,
             "cells_with_page_attr": {str(k): v for k, v in sorted(rows.items())}}
@@ -1668,6 +1738,8 @@ def plan_crosstab(text: str, dataset: str, at: str, rows, cols, values,
 
 
 def edit_crosstab(config, report_path: str, apply: bool = False, **kwargs) -> dict:
+    if apply and not isinstance(config, LocalTemplate):
+        _scope(report_path)
     text = read_template(config, report_path).decode("utf-8")
     new_text, changes = plan_crosstab(text, **kwargs)
     return commit(config, report_path, text, new_text, "crosstab", changes, apply=apply)

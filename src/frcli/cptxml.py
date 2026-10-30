@@ -581,6 +581,13 @@ def sheet_names(text: str):
 
 
 def pick_sheet(text: str, sheet: str = None) -> Element:
+    from .cptmodel import DocumentIndex, GridScope
+    if isinstance(sheet, GridScope):
+        import copy
+        grid = DocumentIndex(text).select(sheet.sheet, sheet.block)
+        element = copy.copy(grid.element)
+        element.attrs = {**element.attrs, "name": grid.sheet}
+        return element
     sheets = sheet_elements(text)
     if not sheets:
         raise ApiError("模板里没有 <Report> 元素，不是可编辑的 cpt 版面")
@@ -597,9 +604,10 @@ def cell_container(text: str, sheet: str = None):
     """某 sheet 的 `<CellElementList>`（可能不存在 / 是自闭合的）。"""
     report = pick_sheet(text, sheet)
     if report.attrs.get("class", "").rsplit(".", 1)[-1] == "PolyWorkSheet":
-        raise ApiError("这是聚合报表（PolyWorkSheet），单元格分布在独立区块中；"
-                       "report cell/table 等普通网格操作不支持该版面。"
-                       "请先下载原始 CPT，再用 report local-inspect --cells 按区块查看")
+        raise ApiError("这是聚合报表（PolyWorkSheet），各区块使用独立坐标；"
+                       "请先用 report local-inspect --cells 查看区块，"
+                       "再在支持网格块的命令中明确 --sheet 和 --block（1 基序号）；"
+                       "非网格块和跨块引用仍不支持")
     return _first_child(text, report, "CellElementList")
 
 
@@ -2685,7 +2693,7 @@ def add_sheet(text: str, name: str, clone_from: str = None) -> tuple:
     block = new_head + block[m.end():]
     # 清空单元格
     block = _re.sub(r"(<CellElementList\s*>).*?(</CellElementList>)",
-                    r"\1\2", block, count=1, flags=_re.S)
+                    r"\1\2", block, count=0, flags=_re.S)
     if "<CellElementList" not in block:
         block = block.replace("</Report>", "<CellElementList></CellElementList></Report>", 1)
     insert_at = sheets[-1].close_end

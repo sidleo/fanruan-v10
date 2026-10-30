@@ -58,6 +58,21 @@ def _platform_read_error_hint(exc: Exception) -> None:
         click.echo(_PLATFORM_READ_HINT, err=True)
 
 
+def _local_options(function):
+    function = click.option("-o", "--output", "local_output", type=click.Path(dir_okay=False),
+                            help="--local --apply 的新输出文件（不覆盖源文件）")(function)
+    return click.option("--local", is_flag=True,
+                        help="离线读写本地 CPT，不加载实例配置或联网")(function)
+
+
+def _template_config(instance, report_path, local=False, output=None):
+    if local:
+        return reportops.LocalTemplate(report_path, output)
+    if output is not None:
+        raise click.UsageError("-o/--output 仅用于 --local 模板编辑")
+    return load_config(instance)
+
+
 @click.group("report")
 def report_group():
     """管理报表文件"""
@@ -387,8 +402,9 @@ def report_fonts(report_path, fmt, instance):
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_sheet(report_path, do_list, add_name, clone_from, rename, remove_name,
-                 apply, any_path, fmt, instance):
+                 apply, any_path, fmt, instance, local=False, local_output=None):
     """工作簿 sheet 管理（🟠 默认 dry-run）
 
     \b
@@ -401,7 +417,7 @@ def report_sheet(report_path, do_list, add_name, clone_from, rename, remove_name
     try:
         if apply and not do_list:
             assert_write_scope(report_path, any_path)
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if do_list:
             result = reportops.edit_sheet(config, report_path, apply=False, action="list")
         elif add_name:
@@ -482,8 +498,9 @@ def report_image(report_path, output, form, instance):
                    "$FRCLI_WRITE_SCOPE，否则拒绝）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_edit(report_path, list_only, dataset, sql, sql_file, replace, connection,
-                param, default, default_formula, apply, any_path, fmt, instance):
+                param, default, default_formula, apply, any_path, fmt, instance, local=False, local_output=None):
     """结构化编辑服务端模板（默认 dry-run）
 
     拉模板 → 结构化改 XML（不是正则；除目标元素外字节原样保留）→ 打印 diff。
@@ -497,9 +514,9 @@ def report_edit(report_path, list_only, dataset, sql, sql_file, replace, connect
     """
     try:
         # 守门放在最前：不依赖实例配置、也绝不依赖网络，任何情况下都先判定
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_summary(config, report_path), format=fmt)
             return
@@ -705,9 +722,11 @@ def _out_plan(result: dict, fmt: str):
         click.echo(result["diff"])
     click.echo(f"bytes: {result['bytes_before']} → {result['bytes_after']}")
     if result["dry_run"]:
-        click.echo("(dry-run，未写服务端；确认无误加 --apply)")
+        click.echo("(dry-run，未写入；确认无误加 --apply)")
+    elif not result.get("applied"):
+        click.echo("(内容无变化，未写入)")
     else:
-        click.echo(f"(已写入 {result['remote']}，回读校验 "
+        click.echo(f"(已写入 {result.get('local', result['remote'])}，回读校验 "
                    f"{'ok' if result.get('upload', {}).get('verified') else '未确认'})")
 
 
@@ -716,7 +735,7 @@ def _out_plan(result: dict, fmt: str):
 @click.option("--sheet", help="sheet 名（缺省 sheet1）")
 @click.option("--from", "from_path",
               help="以某张模板为骨架（服务端路径或本地文件），保留其版面/样式外壳")
-@click.option("--output", type=click.Path(dir_okay=False),
+@click.option("-o", "--output", type=click.Path(dir_okay=False),
               help="同时把生成的模板写到本地文件（不联网）")
 @click.option("--apply", is_flag=True, help="🔴 真写服务端（默认只 dry-run 打印骨架 diff）")
 @click.option("--force", is_flag=True, help="服务端已存在同名模板时覆盖（默认拒绝）")
@@ -724,7 +743,8 @@ def _out_plan(result: dict, fmt: str):
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
-def report_new(report_path, sheet, from_path, output, apply, force, any_path, fmt, instance):
+@click.option("--local", is_flag=True, help="离线创作，不读取实例配置")
+def report_new(report_path, sheet, from_path, output, apply, force, any_path, fmt, instance, local=False):
     """从零新建一个空白模板（🟠 默认只 dry-run）
 
     骨架 = `<TableDataMap/>` + 空 `<CellElementList>` + 保留版面外壳
@@ -737,9 +757,9 @@ def report_new(report_path, sheet, from_path, output, apply, force, any_path, fm
       frcli report new …/r.cpt --output /tmp/r.cpt          # 只生成本地文件
     """
     try:
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, output if local else None)
         _out_plan(reportops.new_template(config, report_path, sheet=sheet,
                                          from_path=from_path, apply=apply, output=output,
                                          force=force), fmt)
@@ -783,11 +803,13 @@ def report_new(report_path, sheet, from_path, output, apply, force, any_path, fm
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_cell(report_path, list_only, at, sheet, value, formula, binding, ds_mode, ds_fn,
                 expand, style,
                 num_format, bold, bg, align, border, merge, ds_result, ds_filter,
                 expand_left, expand_up, show_html, tooltip, clear_cell, apply, any_path, fmt,
-                instance):
+                instance, local=False, local_output=None, block=None):
     """看/改单个单元格（🟢 --list 只读；🟠 改默认 dry-run）
 
     \b
@@ -803,12 +825,15 @@ def report_cell(report_path, list_only, at, sheet, value, formula, binding, ds_m
       frcli report cell …/r.cpt --at A4 --set-formula "=SUM(C3)" --expand-left A3 --apply
     """
     try:
-        config = load_config(instance)
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_cells(config, report_path, sheet=sheet),
                         format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not at:
             raise click.UsageError("要给 --at A1（或用 --list 只看不改）")
@@ -850,8 +875,10 @@ def report_cell(report_path, list_only, at, sheet, value, formula, binding, ds_m
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_highlight(report_path, list_only, at, rules, clear, sheet, apply, any_path, fmt,
-                     instance):
+                     instance, local=False, local_output=None, block=None):
     """条件属性 `<Highlight>`：阈值标红 / 热力图 / 隔行变色 / 隐藏整行（🟠 默认 dry-run）
 
     \b
@@ -864,12 +891,15 @@ def report_highlight(report_path, list_only, at, rules, clear, sheet, apply, any
       frcli report highlight …/r.cpt --at A3:D9 --list -f table
     """
     try:
-        config = load_config(instance)
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_highlights(config, report_path, at=at, sheet=sheet),
                         format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not at:
             raise click.UsageError("要给 --at A1（或用 --list 只看不改）")
@@ -905,9 +935,11 @@ def report_highlight(report_path, list_only, at, rules, clear, sheet, apply, any
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_crosstab(report_path, dataset, at, row_dims, col_dims, values, agg, total_row,
                     total_col, no_header, labels, value_labels, style, header_style, widths,
-                    sheet, apply, any_path, fmt, instance):
+                    sheet, apply, any_path, fmt, instance, local=False, local_output=None, block=None):
     """交叉表 / 动态列：行维度纵向 × 列维度横向 × 值汇总（🟠 默认 dry-run）
 
     列数随数据自动增长（列维度有几个值就几列），缺失的 (行,列) 组合留空格。
@@ -920,9 +952,12 @@ def report_crosstab(report_path, dataset, at, row_dims, col_dims, values, agg, t
           --total-row --total-col --header-style 0 --apply
     """
     try:
-        if apply:
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        if apply and not local:
             assert_write_scope(report_path, any_path)
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         result = reportops.edit_crosstab(
             config, report_path, apply=apply, dataset=dataset, at=at,
             rows=row_dims.split(","), cols=col_dims.split(","), values=values.split(","),
@@ -954,8 +989,9 @@ def report_crosstab(report_path, dataset, at, row_dims, col_dims, values, agg, t
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_dataset(report_path, list_only, full, add_name, conn, sql_text, sql_file, params,
-                   page_sql, set_sql_name, remove_name, apply, any_path, fmt, instance):
+                   page_sql, set_sql_name, remove_name, apply, any_path, fmt, instance, local=False, local_output=None):
     """数据集增删改（🟢 --list 只读；🟠 写默认 dry-run）
 
     ⚠️ 与 `report datasets` 的区别：那条走 REST `format=cpt`（数据集坏时报错、可能读不到），
@@ -970,12 +1006,12 @@ def report_dataset(report_path, list_only, full, add_name, conn, sql_text, sql_f
       frcli report dataset …/r.cpt --remove ds1 --apply
     """
     try:
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_datasets(config, report_path, sql=full),
                         format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         given = [bool(add_name), bool(set_sql_name), bool(remove_name)]
         if sum(given) != 1:
@@ -1018,8 +1054,9 @@ def report_dataset(report_path, list_only, full, add_name, conn, sql_text, sql_f
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_param(report_path, list_only, adds, removes, defaults, formula_defaults, apply, any_path, fmt,
-                 instance):
+                 instance, local=False, local_output=None):
     """模板参数（决定单元格公式里的 `$名字` 能不能解析）
 
     ⚠️ 参数**必须给默认值**：既没传值又没默认值时静默变成空字符串（不报错、导出照成功），
@@ -1032,11 +1069,11 @@ def report_param(report_path, list_only, adds, removes, defaults, formula_defaul
       frcli report param …/r.cpt --set-default topn=20 --apply
     """
     try:
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_params(config, report_path), format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         result = reportops.edit_param(config, report_path, apply=apply, add=adds,
                                       remove=removes, set_default=defaults,
@@ -1063,8 +1100,9 @@ def report_param(report_path, list_only, adds, removes, defaults, formula_defaul
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_style(report_path, list_only, add_style, xml_file, num_format, bold, bg, align,
-                 border, size_pt, apply, any_path, fmt, instance):
+                 border, size_pt, apply, any_path, fmt, instance, local=False, local_output=None):
     """样式表（数字格式 / 粗体 / 底色 / 边框），追加后用 `report cell --style N` 绑定
 
     \b
@@ -1074,11 +1112,11 @@ def report_style(report_path, list_only, add_style, xml_file, num_format, bold, 
       frcli report style …/r.cpt --add --xml-file style.xml --apply
     """
     try:
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_styles(config, report_path), format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not add_style:
             raise click.UsageError("要给 --add（或用 --list 只看）")
@@ -1119,8 +1157,10 @@ def report_style(report_path, list_only, add_style, xml_file, num_format, bold, 
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, header, labels,
-                 expand, style, header_style, widths, sheet, apply, any_path, fmt, instance):
+                 expand, style, header_style, widths, sheet, apply, any_path, fmt, instance, local=False, local_output=None, block=None):
     """一次生成整张取数表（表头 + 逐列绑定 + 扩展方向 + 数据设置，🟠 默认 dry-run）
 
     \b
@@ -1132,9 +1172,12 @@ def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, heade
       frcli report table …/r.cpt --sheet 明细表 --dataset ds1 --at A2 --columns k,val --apply
     """
     try:
-        if apply:
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        if apply and not local:
             assert_write_scope(report_path, any_path)
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         label_list = [x for x in (labels or "").split(",")] if labels else None
         result = reportops.edit_table(config, report_path, apply=apply, dataset=dataset,
                                       at=at, columns=[c for c in columns.split(",")],
@@ -1153,7 +1196,7 @@ def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, heade
 @report_group.command("page")
 @click.argument("report_path")
 @click.option("--list", "list_only", is_flag=True, help="只读列出分页设置（不联网写）")
-@click.option("--header-height", type=float, help="页眉高度（磅）；页眉内容在 <Header>（本 CLI 只读）")
+@click.option("--header-height", type=float, help="页眉高度（磅）；页眉内容用 --header-text 写入")
 @click.option("--footer-height", type=float, help="页脚高度（磅）")
 @click.option("--freeze", help="冻结列行，写 `列数,行数`（如 `1,0` = 冻结第 1 列）；`none` 清除")
 @click.option("--repeat-rows", help="这些 Excel 行号（从 1 起，逗号分隔）允许跨页重复（= 缺省）")
@@ -1178,11 +1221,13 @@ def report_table(report_path, dataset, at, columns, mode, ds_fn, group_by, heade
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_page(report_path, list_only, header_height, footer_height, freeze, repeat_rows,
                 no_repeat_rows, repeat_header_rows, repeat_footer_rows, repeat_header_cols,
                 repeat_footer_cols, page_freeze, header_text, footer_text, header_position,
                 footer_position, header_formula, footer_formula, sheet, apply, any_path, fmt,
-                instance):
+                instance, local=False, local_output=None, block=None):
     """分页设置：页眉页脚高度 / 冻结列 / 重复标题行（🟠 默认 dry-run）
 
     ⚠ `CellPageAttr repeat` **缺省就是 true**：服务端字段初值 63（全位），
@@ -1198,11 +1243,14 @@ def report_page(report_path, list_only, header_height, footer_height, freeze, re
       frcli report page …/r.cpt --no-repeat-rows 3,4 --apply
     """
     try:
-        config = load_config(instance)
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_page(config, report_path, sheet=sheet), format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         result = reportops.edit_page(config, report_path, apply=apply, sheet=sheet,
                                      header_height=header_height, footer_height=footer_height,
@@ -1245,8 +1293,10 @@ def report_page(report_path, list_only, header_height, footer_height, freeze, re
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_chart(report_path, list_only, at, dataset, kind, category, series, value, chart_fn,
-                 title, show_title, cs, rs, sheet, apply, any_path, fmt, instance):
+                 title, show_title, cs, rs, sheet, apply, any_path, fmt, instance, local=False, local_output=None, block=None):
     """在单元格里插图表（VanChart：柱形/折线/饼/环形，🟠 默认 dry-run）
 
     验收必须**看图**：`report image`(PNG) 或 `export pdf` —— 列名写错时不会报错，只会画出空图。
@@ -1259,11 +1309,14 @@ def report_chart(report_path, list_only, at, dataset, kind, category, series, va
       frcli report chart …/r.cpt --list -f table
     """
     try:
-        config = load_config(instance)
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_charts(config, report_path, sheet=sheet), format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not at:
             raise click.UsageError("要给 --at A1（或用 --list 只看不改）")
@@ -1293,8 +1346,10 @@ def report_chart(report_path, list_only, at, dataset, kind, category, series, va
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
+@click.option("--block", type=click.IntRange(min=1), help="聚合块 1 基序号；同时使用 --sheet")
 def report_link(report_path, list_only, at, to, kind, params, frame, clear, sheet, apply,
-                any_path, fmt, instance):
+                any_path, fmt, instance, local=False, local_output=None, block=None):
     """单元格超链接 / 钻取（🟠 默认 dry-run）
 
     超链接是**纯预览态交互**：实测 `export excel` / `export pdf` **都不保留任何链接痕迹**
@@ -1310,12 +1365,15 @@ def report_link(report_path, list_only, at, to, kind, params, frame, clear, shee
       frcli report link …/r.cpt --list -f table
     """
     try:
-        config = load_config(instance)
+        if block is not None:
+            from ..cptmodel import GridScope
+            sheet = GridScope(sheet, block)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_links(config, report_path, at=at, sheet=sheet),
                         format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not at:
             raise click.UsageError("要给 --at A1（或用 --list 只看不改）")
@@ -1352,8 +1410,9 @@ def report_link(report_path, list_only, at, to, kind, params, frame, clear, shee
               help="确认写这个目标而不限范围（没有它就必须先设 $FRCLI_WRITE_SCOPE）")
 @click.option("-f", "--format", "fmt", type=click.Choice(["json", "table"]), default="json")
 @click.option("-i", "--instance", help="FineReport 实例名")
+@_local_options
 def report_widget(report_path, list_only, param, kind, options, default_value, default_formula, label, x, y,
-                  width, height, no_declare, apply, any_path, fmt, instance):
+                  width, height, no_declare, apply, any_path, fmt, instance, local=False, local_output=None):
     """参数面板控件（下拉/日期/文本，🟠 默认 dry-run）
 
     **绑定靠"控件名 = 参数名"**（服务端 `getWidgetByName(parameter.getName())`）：
@@ -1366,11 +1425,11 @@ def report_widget(report_path, list_only, param, kind, options, default_value, d
       frcli report widget …/r.cpt --list -f table
     """
     try:
-        config = load_config(instance)
+        config = _template_config(instance, report_path, local, local_output)
         if list_only:
             output_data(reportops.template_widgets(config, report_path), format=fmt)
             return
-        if apply:
+        if apply and not local:
             assert_write_scope(report_path, any_path)
         if not param:
             raise click.UsageError("要给 --param 参数名（或用 --list 只看）")
@@ -1382,3 +1441,8 @@ def report_widget(report_path, list_only, param, kind, options, default_value, d
         _out_plan(result, fmt)
     except Exception as e:
         error(e)
+
+
+# 结构操作与既有 report 命令共享配置、输出和写范围入口。
+from .report_structure import register as _register_structure
+_register_structure(report_group)
