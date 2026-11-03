@@ -68,6 +68,86 @@ def test_parse_real_server_response():
     assert res.value.fields["value"] is True       # java.lang.Boolean
 
 
+def test_parse_response_empty_body_is_actionable():
+    from frcli.remotedesign import _decompress_rpc_body
+    with pytest.raises(ApiError) as exc:
+        _decompress_rpc_body(b"")
+    msg = str(exc.value)
+    assert "响应为空" in msg and "重试" in msg
+
+
+def test_parse_response_html_instead_of_gzip_is_actionable():
+    from frcli.remotedesign import _decompress_rpc_body
+    with pytest.raises(ApiError) as exc:
+        _decompress_rpc_body(b"<!doctype html><html><body>Please login</body></html>")
+    msg = str(exc.value)
+    assert "HTML" in msg and "server test" in msg and "不是模板坏" in msg
+
+
+def test_parse_response_error_page_with_bom_and_comment_is_html():
+    from frcli.remotedesign import _decompress_rpc_body
+    body = (b"\xef\xbb\xbf\n<!-- maintenance -->\n<?xml version='1.0'?>"
+            b"<!DOCTYPE html><html></html>")
+    with pytest.raises(ApiError) as exc:
+        _decompress_rpc_body(body)
+    assert "HTML" in str(exc.value)
+
+
+def test_parse_response_truncated_gzip_is_actionable():
+    """回归（2026-11-03 真实会话）：report preview 偶发 zlib -3，原来只报 UNKNOWN。"""
+    from frcli.remotedesign import _decompress_rpc_body
+    corrupt = bytes.fromhex("1f8b08000000000000") + b"not-a-valid-deflate-stream"
+    with pytest.raises(ApiError) as exc:
+        _decompress_rpc_body(corrupt, "远程设计 previewTableData")
+    msg = str(exc.value)
+    assert "解压失败" in msg
+    assert "重试" in msg and "--rows" in msg
+    assert "模板损坏" in msg
+
+
+def test_parse_response_truncated_valid_gzip_raises_api_error():
+    """有效 gzip 被截断会抛 EOFError：必须同样归类为可操作的 ApiError。"""
+    from frcli.remotedesign import _decompress_rpc_body
+    truncated = gzip.compress(b"hello world" * 50)[:-6]
+    with pytest.raises(ApiError) as exc:
+        _decompress_rpc_body(truncated)
+    assert "解压失败" in str(exc.value)
+
+
+def test_parse_response_wires_decompress_errors():
+    """parse_response 本身也要走分类错误，而不是裸 gzip/zlib 异常。"""
+    with pytest.raises(ApiError):
+        parse_response(b"")
+    with pytest.raises(ApiError):
+        parse_response(bytes.fromhex("1f8b08000000000000") + b"bad")
+
+
+def test_call_serialized_payload_reports_corrupt_response():
+    """call_serialized_payload 的接线：HTTP 200 + 损坏 gzip 要报 ApiError 且标注方法名。"""
+    import httpx
+    from frcli.remotedesign import RemoteDesignSession
+
+    class _Cfg:
+        workspace = "/webroot"
+        url = "http://localhost:8705"
+        username = "u"
+        password = "p"
+
+    session = RemoteDesignSession(_Cfg())
+    session.token = "tok"
+    session._http.close()
+    session._http = httpx.Client(
+        base_url="http://localhost:8705",
+        transport=httpx.MockTransport(
+            lambda req: httpx.Response(200, content=b"not-gzip-not-html")),
+        follow_redirects=False,
+    )
+    with pytest.raises(ApiError) as exc:
+        session.call_serialized_payload("com.fr.data.operator.DataOperatorProvider",
+                                        "previewTableData", [])
+    assert "previewTableData" in str(exc.value)
+
+
 def test_normalize_report_path():
     # 覆盖点：路径含 **CJK** 时也要能正确归一化（占位符故意用中文，别换成纯 ASCII）
     assert normalize_report_path("/demo_group/示例用户/示例目录/a.cpt") == \

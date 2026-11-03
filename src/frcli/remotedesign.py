@@ -27,6 +27,7 @@ REST，而是把服务端的 WEB-INF 目录当成远程文件系统，走一条�
 
 import gzip
 import hashlib
+import zlib
 import os
 import posixpath
 import ssl
@@ -118,8 +119,55 @@ def _throwable_message(obj, depth: int = 0) -> str:
     return out
 
 
+def _looks_like_html_page(body: bytes) -> bool:
+    """剥掉 BOM/空白/XML 声明/HTML 注释后，判断正文是否以 doctype/html 开头。"""
+    head = body[:400].lstrip(b"\xef\xbb\xbf \t\r\n")
+    changed = True
+    while changed and head:
+        changed = False
+        low = head.lower()
+        if low.startswith(b"<?xml"):
+            end = head.find(b"?>")
+            if end != -1:
+                head = head[end + 2:].lstrip()
+                changed = True
+        elif low.startswith(b"<!--"):
+            end = head.find(b"-->")
+            if end != -1:
+                head = head[end + 3:].lstrip()
+                changed = True
+    return head[:200].lower().startswith((b"<!doctype", b"<html"))
+
+
+def _decompress_rpc_body(body: bytes, what: str = "远程设计 RPC") -> bytes:
+    """解压远程设计响应；失败时给可操作的分类错误（而不是裸的 zlib UNKNOWN）。
+
+    实测（2026-11 真实会话）`report preview` 偶发
+    `Error -3 while decompressing data: invalid code lengths set / invalid distance too far back`：
+    响应以 gzip 魔数开头但内容被截断/损坏，多为服务端在查询/序列化途中出错，或会话异常返回 HTML 页。
+    只读命令原样重试通常即可；不要据此判定模板损坏。
+    """
+    if not body:
+        raise ApiError(
+            f"{what} 响应为空（HTTP 200 无正文）；多为远程设计会话异常或服务端中断，"
+            "重试一次即可；仍失败先 `server test` 复核登录态。不是模板坏。")
+    try:
+        return gzip.decompress(body)
+    except (OSError, EOFError, zlib.error) as exc:
+        if _looks_like_html_page(body):
+            raise ApiError(
+                f"{what} 返回的是 HTML 页而不是 gzip（HTTP 200，{len(body)}B）："
+                "多为远程设计会话失效或服务端异常，先重试并 `server test` 复核登录态。"
+                f"不是模板坏。页面开头: {body[:120]!r}") from exc
+        raise ApiError(
+            f"{what} 响应解压失败（{len(body)}B，gzip 头 {body[:16].hex()}）："
+            "多为服务端在查询/序列化过程中出错、或响应被截断。只读命令可原样重试；"
+            "`report preview` 可减小 `--rows`，或改用 `export` / `report download` 复核；"
+            f"不要据此判定模板损坏。原始错误: {exc}") from exc
+
+
 def parse_response(body: bytes) -> RpcResult:
-    r = jser.JavaReader(gzip.decompress(body))
+    r = jser.JavaReader(_decompress_rpc_body(body))
     r.raw(4)
     marker = r.read_object()
     if not isinstance(marker, JObject):
@@ -292,7 +340,7 @@ class RemoteDesignSession:
                           headers={"Content-Type": "application/octet-stream"})
         if resp.status_code != 200:
             raise ConnectionError(f"远程设计 channel 失败: HTTP {resp.status_code}")
-        r = jser.JavaReader(gzip.decompress(resp.content))
+        r = jser.JavaReader(_decompress_rpc_body(resp.content, f"远程设计 {method}"))
         r.raw(4)
         marker = r.read_object()
         if not isinstance(marker, JObject):

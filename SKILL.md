@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.11.3
+  version: 0.11.4
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -467,6 +467,8 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 - `report list /` 会返回**整个服务器**的文件树（数千条，随平台增长；实测 2026-10 约 3.9k），不要用 `/` 当"顶层"。
 - `-f/--format` 是**子命令**选项，必须写在子命令后面：`frcli report list -f json`；写成 `frcli -f json report list`
   会报 `Error: No such option: -f`（2026-10-29 真实会话踩过一次，不是命令缺失）。
+- 确认/条数选项易猜错：`report delete` 用 `--force`（不是 `--yes`）；`local-examples` 的条数是 `-n/--limit`（不是 `--list`）——
+  2026-11 真实会话各猜错一次；先 `--help` 比试错快。
 - ⚠️ `report authed` **不是**「当前账号有权限的模板树」：它读的是模板**认证(authentication)配置**路由
   （`GET /decision/v10/report/templates/all/authentication`），实测该路由**恒返回 `[]`**（HTTP 200 的原始响应就是
   `{"data":[]}`，`keyword/type/id/pid` 多种参数形态同样为空）——**空数组不代表账号没权限**，别拿它判断
@@ -1079,6 +1081,11 @@ REST 的 `POST /v10/dataset/preview` 是**服务器数据集**的管理员接口
   `InvalidClassException`，说明服务端类结构变了：需要重新生成骨架（`dataset_preview._TABLE_DATA_SKELETON`），
   不是 SQL/连接问题。
 - `--params` 的 `null` 按空串替换；布尔等非字符串值用 Python `str()`（`True`/`False`），SQL 里要 `'true'` 请直接传字符串。
+
+**`report preview` 偶发 `Error -3 while decompressing data`**（`invalid code lengths set` / `invalid distance too far back`）：
+远程设计响应以 gzip 开头但内容被截断/损坏，多是服务端在查询/序列化途中出错或会话异常；**不是模板坏**。
+0.11.4 起错误会带「空响应/HTML 页/gzip 解压失败」分类、响应长度与建议：只读命令原样重试、`--rows` 调小，
+或改用 `export` / `report download` 复核。
 
 ### 6.26 改定时任务的模板路径：先 pause，再 update --template，最后 resume
 
