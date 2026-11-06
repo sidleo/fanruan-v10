@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.11.4
+  version: 0.11.5
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -460,6 +460,9 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
 
 - `schedule get/run/update` 收的是**任务名**；`schedule delete` 收的是 **UUID `id`**（先 `schedule get` 拿），且请求体是**裸数组** `["<id>"]`。传错会报 `任务不存在` 或删不动。
 - `schedule get` 内部是**模糊搜索取第一条**，任务名需与 `schedule list` 完全一致，避免误命中。
+- `user list` 只返回**当前账号可见的少量用户**（不是全量组织目录，实测 6 条级），没有 `--page`/分页参数；
+  查某工号的姓名直接在 `user list -f json` 里 grep，**不需要也不能翻页**（2026-11 真实会话猜过一次 `--page`）。
+  想看全量目录没有接口权限，退回平台管理端。
 - 报告类命令的模板路径是**位置参数**：`report info <路径>`（不要写 `--path`）；`report datasets` **没有 `--name` 过滤**
   （输出全部数据集，要单看某个就 `--sql` 后本地筛/直接读 JSON 的 `name` 字段）；`schedule` **没有 `runs` 子命令**
   ——查执行记录用 `schedule record`/`records`（2026-10 三个真实会话各踩一次，属参数猜错，命令签名见本文件命令树）。
