@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.11.5
+  version: 0.11.6
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -484,6 +484,8 @@ rm -f ~/.frcli/tokens/*.json    # 下次调用自动重登
   `detailMessage`/最近记录，再 `schedule history <任务名>` 取最新 `id` 去 `log`；0.10.15 起传错会直接给这个提示。
 - ⚠️ `schedule history -n N` 返回的是**按时间升序**的前 N 条 —— `-n 1` 给的是**最早**那条，不是最新。取最新要么放大 `-n` 后取最后一条，要么用 `schedule record`。
 - ⚠️ `schedule record` 的服务端**分页内顺序不保证按时间**（实测同一页出现 10-02、10-01、10-23 混排）：CLI 单页也按 `time` 倒序输出；要跨页取最新记录加 `--all`（翻全量后整体倒序）。
+- 手动 `schedule run` 的执行结果优先看 `schedule history`：实测 `schedule record` 列表里可能不出现该次手动执行
+  （history 的 `logType` 1=成功/3=失败）。要确认推送是否真的发出，再看推送管理/目标群消息，别只看 record。
 - ⚠️ 平台 `task/search` 是**子串模糊搜索**且取第一条：`get` 传前缀/错字会命中别的任务（会 stderr 警告）；`update/pause/resume/run` 这类写命令要求**任务名精确匹配**，不匹配直接拒绝。
 - ⚠️ `schedule tasks --all`（`task/listAll/2`）只含**本人创建**的任务（实测 397 vs 名单 1155）：要全部任务名用 `schedule list`；`get/pause/resume/update` 接受 taskId，但 UUID 反查同样只覆盖本人任务。
 - `server test` 0.1.1 起**真实发一次认证请求**（返回 `http_status` + `relogin`）——此前只查本地缓存，缓存 token 已失效时照样报 ok（假阳性）。
@@ -1222,6 +1224,15 @@ frcli report local-inspect "<reportlets目录>/<样例>.cpt" --sql
 见本地知识库，不在本仓库记录）；目标模板当天记录为空时查同目录姊妹模板。
 0.10.23 起 `report list`/`report ws-list` 空结果会在 stderr 提示「可能无权限」，`report datasets/download`
 撞权限/找不到时也会提示改用元数据表；别把空结果当成「报表不存在」。
+
+若该平台是 **FineReport 11.x**（`frcli -i <实例> system version` 看 core 的 `minorVersion` 为 11.x 段），
+远程设计通道（所有走 `/decision/remote/design` 的命令：`report download/upload`、`report cell|dataset|edit` 的远程读写、
+`report preview`、只读 `rpc call`、`rpc` 写）会报
+`远程设计认证 /verify 失败: [11300113] Main Version Not Match`：frcli 的远程设计协议按 FR10 握手，
+FR11 服务端的主版本校验会拒绝，与账号权限/密码无关（`server test` 能过）。
+只读 REST（`report info/paras/datasets/list`、`export`）不受影响；读 FR11 模板结构可改用
+`GET /decision/view/report?reportlet=<路径>&format=cpt`（返回 `<TableDataMap>` XML，可读数据集/参数/单元格，
+不含 `<WorkBook>`、不能回写），或走平台元数据表反查。0.11.6 起该错误会直接带这句提示，别反复重试或改参数。
 
 ### 6.32 函数检索、基础语法与公式默认值
 

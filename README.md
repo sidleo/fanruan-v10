@@ -2,7 +2,7 @@
 
 `fanruan_v10` 提供与 FineReport V10 决策平台交互的命令行工具 **`frcli`**，以及供 Agent 使用的 **`fanruan-v10` skill**。它把报表查找、参数与 SQL 读取、导出、模板创作、运行时巡检和调度管理封装成命令，输出 JSON、表格或本地文件。
 
-当前发布版本为 **0.11.5**，包含 CPT 结构索引、依赖诊断、行列与区域编辑、本地模板编辑和聚合网格块选择；本版把远程设计响应解压失败（`report preview` 偶发 `Error -3`）从裸 `UNKNOWN` 改为可操作分类（重试/`--rows`/改用 export、download），并包含此前 cwd 遮蔽崩溃的启动修复。
+当前发布版本为 **0.11.6**，包含 CPT 结构索引、依赖诊断、行列与区域编辑、本地模板编辑和聚合网格块选择；本版在远程设计认证失败时给出可操作提示（如连 FineReport 11.x 平台的 FR11 主版本不匹配：只读 REST 仍可用、改用 `format=cpt`/元数据表），并包含此前的远程设计响应解压失败分类与 cwd 遮蔽启动修复。
 
 CLI 与 skill 同源：`src/frcli/` 是唯一源码，[SKILL.md](SKILL.md) 是 skill 入口。目录名保留 `fanruan_v10`，skill 名使用 `fanruan-v10`；协作与修改要求见 [AGENTS.md](AGENTS.md)。
 

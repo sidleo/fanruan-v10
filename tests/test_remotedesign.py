@@ -148,6 +148,54 @@ def test_call_serialized_payload_reports_corrupt_response():
     assert "previewTableData" in str(exc.value)
 
 
+def _login_with_verify_body(monkeypatch, body):
+    from frcli.config import ServerConfig
+    from frcli.remotedesign import RemoteDesignSession
+
+    class _Resp:
+        status_code = 200
+        content = b""
+
+        def json(self):
+            return body
+
+    session = RemoteDesignSession(ServerConfig(name="t", url="https://x",
+                                               username="u", password="p"))
+    monkeypatch.setattr(session, "check",
+                        lambda: {"transmissionEncryption": 2, "frontSeed": "x"})
+    monkeypatch.setattr(session, "_post", lambda *a, **k: _Resp())
+    return session
+
+
+def test_login_main_version_mismatch_is_actionable(monkeypatch):
+    """回归（2026-11-10 真实会话）：FR11 平台远程设计 /verify 报 11300113，原来只有裸错误码。"""
+    session = _login_with_verify_body(
+        monkeypatch, {"errorCode": "11300113", "errorMsg": "Main Version Not Match"})
+    with pytest.raises(ApiError) as ei:
+        session.login()
+    msg = str(ei.value)
+    assert "11300113" in msg
+    assert "11.x" in msg and "format=cpt" in msg and "不要反复重试" in msg
+
+
+@pytest.mark.parametrize("body", [
+    {"errorCode": "10001", "errorMsg": "用户名或密码错误"},
+    {"errorCode": "11300001", "errorMsg": "数据集配置错误"},
+    {"errorCode": "113001130", "errorMsg": "Main Version Not Match"},   # 前缀码不算
+])
+def test_login_other_errors_are_not_mislabeled(monkeypatch, body):
+    session = _login_with_verify_body(monkeypatch, body)
+    with pytest.raises(ApiError) as ei:
+        session.login()
+    msg = str(ei.value)
+    assert "format=cpt" not in msg and "只支持 FineReport 10.x" not in msg
+
+
+def test_login_success_sets_token(monkeypatch):
+    session = _login_with_verify_body(monkeypatch, {"data": "jwt-token"})
+    assert session.login() == "jwt-token"
+
+
 def test_normalize_report_path():
     # 覆盖点：路径含 **CJK** 时也要能正确归一化（占位符故意用中文，别换成纯 ASCII）
     assert normalize_report_path("/demo_group/示例用户/示例目录/a.cpt") == \

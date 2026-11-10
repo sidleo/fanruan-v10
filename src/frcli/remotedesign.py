@@ -293,7 +293,20 @@ class RemoteDesignSession:
                                chk.get("frontSeed", ""), chk.get("frontSM4Key", ""))
         resp = self._post(f"{self.base}/verify",
                           data={"username": self.config.username, "password": enc})
-        data = self._unwrap(resp, "远程设计认证 /verify")
+        try:
+            data = self._unwrap(resp, "远程设计认证 /verify")
+        except ApiError as e:
+            msg = str(e)
+            # 精确匹配 /verify 的 11300113（避免 "113001130" 或正文里偶然出现关键词时误报）
+            if msg.startswith("远程设计认证 /verify 失败: [11300113]"):
+                raise ApiError(
+                    f"{msg}\n远程设计通道只支持 FineReport 10.x：目标平台 core 主版本是 11.x 时"
+                    " `/verify` 会因主版本不匹配拒绝（`frcli -i <实例> system version` 看 core 的 minorVersion）。"
+                    " 只读 REST 命令（report info/paras/datasets/list、export）不受影响；"
+                    " 读 FR11 模板结构可改用 `GET /decision/view/report?reportlet=<路径>&format=cpt`"
+                    "（返回 `<TableDataMap>` XML，可读数据集/参数/单元格，不能回写），或走平台元数据表反查；"
+                    " 不要反复重试或改参数。") from e
+            raise
         if not data:
             raise AuthError("远程设计认证未返回 token")
         self.token = data
