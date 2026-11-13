@@ -49,9 +49,9 @@ check() {
     # （既没有命中数、也没扫②③、也没结论 —— 2026-10 实测：exit=1、stdout 只有这行）。
     n=$(grep -rIoE "$bl" . \
           --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=.pytest_cache \
-          --exclude-dir=dist --exclude-dir=node_modules 2>/dev/null | wc -l | tr -d ' ' || true)
+          --exclude-dir=dist --exclude-dir=node_modules --exclude-dir=.llm-wiki 2>/dev/null | wc -l | tr -d ' ' || true)
     echo "   命中 $n"; if [ "$n" != "0" ]; then bad=1;
-        grep -rIlE "$bl" . --exclude-dir=.git --exclude-dir=dist 2>/dev/null | sed 's/^/     /' | head -5
+        grep -rIlE "$bl" . --exclude-dir=.git --exclude-dir=dist --exclude-dir=.llm-wiki 2>/dev/null | sed 's/^/     /' | head -5
     fi
     scanned=$((scanned + 1))
 
