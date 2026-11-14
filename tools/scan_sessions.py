@@ -40,6 +40,8 @@ SESSIONS = pathlib.Path("~/.dsh/sessions").expanduser()
 #:
 #: ⚠ 已知**覆盖边界**（只记录，不扩正则 —— 每放宽一次都换来一批假阳性）：
 #: `sudo /abs/frcli …`、`nohup …`、`exec/command/time /abs/frcli …` 这类**包装前缀**仍不命中（旧行为）。
+#: `run_code` 里内嵌的 `tools.bash({command: …})` 会先抽出命令正文再匹配（见 RUN_CODE_CMD），
+#: 但脚本里只是**提到** frcli（注释/描述/字符串）不算调用。
 #: 主产物是「调用数 + 报错片段」，宁可少报也不要把非执行文本算成调用。
 CALL = re.compile(
     r"(?:^|[\n;|&(]|\$\()\s*"                    # 命令位：行首 / ; | && || ( 或 $(
@@ -49,6 +51,14 @@ CALL = re.compile(
     r"|python3?\s+-\s*m\s+frcli(?![\w.\-])"        # python -m frcli
     r"|fanruan[-_]v10/references/(?:frcli|run\.py)",  # 直接跑本 skill 的入口
     re.I | re.M,
+)
+
+#: `run_code`（JS 编排工具）不是 shell 调用本身，但它内嵌 `tools.bash({command: ...})`：
+#: 实测过一个真实会话（2026-11-14，16+ 次 frcli 调用全写在 run_code 里）被整段漏报。
+#: 只抽 `command:` 的值（模板字符串或引号字符串）再跑 CALL，避免把注释/描述里的 "frcli" 当执行。
+RUN_CODE_CMD = re.compile(
+    r"""command\s*:\s*(`(?:\\.|[^`\\])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')""",
+    re.S,
 )
 
 #: shell 调用判据 = **参数形状**，不是工具名：`args` 能解析成含 `command` 字符串字段的对象。
@@ -75,8 +85,16 @@ def shell_command(data: dict, args):
             obj = json.loads(args)
         except Exception:
             return args if not (data.get("name") or data.get("tool")) else None
-    cmd = obj.get("command") if isinstance(obj, dict) else None
-    return cmd if isinstance(cmd, str) and cmd else None
+    if isinstance(obj, dict):
+        cmd = obj.get("command")
+        if isinstance(cmd, str) and cmd:
+            return cmd
+        # run_code：从 code 里抽出内嵌的 tools.bash({command: ...}) 命令正文
+        code = obj.get("code")
+        if isinstance(code, str) and "tools.bash" in code:
+            cmds = [m.group(1)[1:-1] for m in RUN_CODE_CMD.finditer(code)]
+            return "\n".join(cmds) if cmds else None
+    return None
 
 #: 通用报错/异常信号（**只在 frcli 调用的结果里**用来兜底找错，见 scan()）
 ERR = re.compile(

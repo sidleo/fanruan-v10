@@ -38,6 +38,39 @@ def test_call_regex_is_specific_to_this_skill():
     assert ss.CALL.search('python3 /p/fanruan_v10/references/run.py --version')
 
 
+def test_run_code_embedded_shell_calls_are_detected():
+    """`run_code` 里内嵌的 tools.bash 命令要算调用（2026-11-14 整段漏报过一个真实会话）。
+
+    真实形状：`const r = await tools.bash({description: "...", command: `frcli schedule run "x"`})`。
+    """
+    data = {"name": "run_code", "arguments": json.dumps({
+        "code": 'const r = await tools.bash({description: "补跑", command: `FRCLI_TIMEOUT=600 frcli schedule run "t"`});'
+    })}
+    cmd = ss.shell_command(data, data["arguments"])
+    assert cmd and "frcli schedule run" in cmd
+    assert ss.CALL.search(cmd)
+
+    # 只是提到 frcli（注释/描述）不算执行
+    data2 = {"name": "run_code", "arguments": json.dumps({
+        "code": '// 这里调用 frcli 前先备份\ntools.bash({description: "说明提到 frcli", command: `echo hi`});'
+    })}
+    cmd2 = ss.shell_command(data2, data2["arguments"])
+    assert cmd2 == "echo hi"
+    assert not ss.CALL.search(cmd2)
+
+
+def test_run_code_session_is_counted_and_error_paired():
+    rows = [
+        {"type": "tool/call", "data": {"name": "run_code", "callId": "c1",
+         "arguments": json.dumps({"code": 'await tools.bash({command: `frcli schedule run "t"`});'})}},
+        {"type": "tool/result", "data": {"callId": "c1",
+         "message": {"content": [{"type": "text", "text": '{"status": "error", "error": {"code": "API_ERROR"}}'}]}}},
+    ]
+    res = ss.scan(rows)
+    assert len(res["frcli_cmds"]) == 1
+    assert res["errors"], "run_code 里 frcli 的报错也要被配上"
+
+
 def test_windows_filter_uses_record_time_not_file_mtime():
     """按**记录时间戳**切窗口：会话跨天延续，按文件 mtime 会漏（实测扫「昨天」得 0 个）。"""
     src = (ROOT / "tools" / "scan_sessions.py").read_text(encoding="utf-8")
