@@ -55,11 +55,14 @@ def load_config(name: str = None) -> ServerConfig:
         raise ConfigError("未配置任何 FineReport 实例。使用 `frcli server add` 添加实例。")
 
     if name is None:
-        name = CLI_INSTANCE or os.environ.get("FRCLI_INSTANCE") or config.get("default")
+        explicit = CLI_INSTANCE or os.environ.get("FRCLI_INSTANCE")
+        name = explicit or config.get("default")
         if not name:
             name = next(iter(instances))
         if name not in instances:
-            raise ConfigError(f"默认实例 '{name}' 不存在。可用实例: {list(instances.keys())}")
+            # 显式 -i/FRCLI_INSTANCE 传了不存在的名字时，别把他说成「默认实例」（真实会话里误导过）
+            origin = "指定" if explicit else "默认"
+            raise ConfigError(f"{origin}实例 '{name}' 不存在。可用实例: {list(instances.keys())}")
 
     if name not in instances:
         raise ConfigError(f"实例 '{name}' 不存在。可用实例: {list(instances.keys())}")
