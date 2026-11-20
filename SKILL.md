@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.11.9
+  version: 0.11.10
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -379,6 +379,10 @@ frcli schedule setting
 
 `export image` 报 `错误代码:11100023 导出图片过大，请减少导出的内容`：平台对单张 PNG 有尺寸/内容上限，
 不是 CLI 故障；改用 `export pdf`/`export excel`，或减少列数/拆 sheet 后再出图。
+
+**`extype=simple` 导出的 xlsx 可能缺 `<dimension ref>`**：Excel/openpyxl 会只显示 A1 一格（数据其实都在
+`<sheetData>` 里）。验收时按 `xl/worksheets/sheetN.xml` 读，或补 `<dimension ref="A1:XXn"/>` 后再交付；
+不要据此判定导出失败（2026-11 真实会话两次踩到，都是原样导出的大模板）。
 
 ⚠️ **选择器也有两种写法**，两种都要认（0.10.7 起按 `(?:id|class)=` 匹配）：
 老语料是 `<div id="detail-message">错误代码:11300002 …</div>`；2026-10 实测的**内存保护页**只有 class：
@@ -1263,7 +1267,7 @@ FR11 服务端的主版本校验会拒绝，与账号权限/密码无关（`serv
 | `导出产物是平台出错页…平台原因: 很抱歉，数据量过大触发保护机制…` | **平台内存保护**（不是格式问题）：先缩小查询数据量/分批导出；`extype=simple` **不解除**该保护；管理员可在 智能运维-内存管理-模板限制 调整上限（§6.1） |
 | `…The read operation timed out`（导出、或 `report info/datasets/paras` 读模板） | 设 `FRCLI_TIMEOUT=300`（批量 600）重跑；复杂模板冷启动 50s 级，读取也会打空（§6.2） |
 | `远程设计请求失败: …`（`report upload/delete/download/cell/table/…`、`report new --from/--apply` 等走远程设计的命令） | 超时用 **`FRCLI_RD_TIMEOUT`**（默认 300，不是 `FRCLI_TIMEOUT`）；被对端重置原样重试；代理故障查代理链路（§6.2 / §6.19c） |
-| `No such command 'x'` / `No such option: --y` | 命令树以 `frcli --help` 与 `<命令组> --help` 为准。常见误猜：顶层没有 `record`（用 `schedule record`）、没有 `help`（用 `--help`）；`system info` 不存在（用 `system version` / `system health`）；**报表路径是位置参数**，不是 `--path` |
+| `No such command 'x'` / `No such option: --y` | 命令树以 `frcli --help` 与 `<命令组> --help` 为准。常见误猜：顶层没有 `record`（用 `schedule record`）、没有 `help`（用 `--help`）；`system info` 不存在（用 `system version` / `system health`）；`report search` 不存在（用 `report list / --keyword`）、`schedule show` 不存在（用 `schedule get`）；**报表路径是位置参数**，不是 `--path` |
 | `请求失败: …Connection reset by peer` / `broken pipe` | **不是超时**：原样重试即成功（批量里失败的那几条单独重试）；调大超时变量无效（§6.19c） |
 | `请求失败: 503 Service Unavailable（…本机 HTTP 代理链路故障…）` | 失败在**本机 HTTP 代理这一跳**（`httpx.ProxyError`），不是平台故障：查代理/VPN 与节点；`server test` 走同一代理，只能复核（§6.19c） |
 | `schedule list` / `report list` 返回 `[]` | 认证失效（可能未过期）：0.1.1 起自动重登一次；仍为空则手动 `rm -f ~/.frcli/tokens/*.json`（§6.4） |
