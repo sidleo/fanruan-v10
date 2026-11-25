@@ -2,7 +2,7 @@
 name: fanruan-v10
 description: "使用 frcli 命令行工具操作 FineReport V10 报表服务器（帆软决策平台）。覆盖 10 个命令组：server(多实例配置) / report(模板目录·参数·数据集SQL·服务器数据集·模板上传覆盖删除·**本地Demo检索与设计画像 local-examples/local-profile/local-inspect**·**模板从零创作 new/cell/dataset/param/style/table/crosstab/highlight/page/chart/widget/link**) / export(PDF·Excel·Word·图片·CSV·批量) / attach(附件上传下载) / system(版本·健康·模块·权限·登录策略) / **inspect(运行时巡检·模板性能分析·各环节/单元格耗时)** / entry(平台条目·消息) / user(用户·部门·岗位) / schedule(定时任务·执行记录·日志节点树) / rpc(远程设计RPC·只读白名单·写需--yes)。触发词：FineReport、帆软、**本地Demo/样例学习/设计画像/报表选型/信息层级/版式设计/视觉技巧/图表选型/交互设计**、**运行时巡检/模板性能分析/runtime-inspection/性能瓶颈**、报表导出、.cpt、决策平台、定时任务、服务器数据集、数据集字段、**数据集预览**、**函数检索/公式检查/动态默认值**、执行记录、附件、改模板、上传模板、覆盖模板、**画图/图表/柱状图/折线图/饼图、交叉表、条件属性/标红/热力图、参数面板/控件、钻取/超链接、组内小计/占比/同比/环比/累计、页眉页脚/页码/重复标题行**。通过远程设计通道可直接写服务端模板（report upload/delete）或**从零创作报表**（report new/table/cell/dataset，见 references/cpt-authoring.md），不再需要 Designer。导出会真实触发服务端报表计算，产物必须校验魔数并调大超时。"
 metadata:
-  version: 0.11.11
+  version: 0.11.12
   requires:
     bins: ["frcli"]
   cliHelp: "frcli --help"
@@ -968,6 +968,16 @@ frcli inspect status                                                          # 
 `inspect` 结果 `extra['db fetch'][数据集].sql` **只给前 500 个字符**（平台插件截断，不是 CLI 截；
 实测 2026-10-24 有会话据此误判「SQL 没更新/上传没生效」，白查一轮）。核对完整 SQL 用
 `report datasets <模板> --sql` 或 `report download` 读模板字节；命令检测到 500 字符会在 stderr 提示。
+
+### 6.22c 导出对比先按业务键对齐行序，不要按行号
+
+同一模板两次导出、或原版与改版对比时，**不要按行号逐格比**：数据集/SQL 没写 `ORDER BY` 时，
+FineReport 导出的行顺序不稳定（2026-11 实测同一模板同一参数两次导出，「项目by大区」的大区子行顺序会互换：
+渤湾/北京/塞北 ↔ 塞北/北京/渤湾）。按行号对齐会把整块误判成「全列差异」。
+
+- 先按业务键（项目/大区/商品编码等）排序，或建立 `键 → 各列值` 的映射再比；键缺失时才退化为行号比较。
+- 对比脚本对「无法对齐」的块要显式输出，而不是报差异；差异结论按业务键复核。
+- 真要对齐输出，可在数据集 SQL 末尾补稳定 `ORDER BY`（注意分页/性能影响），或验收时只比键集合与逐键数值。
 
 ### 6.23 大报表性能排查：先分「取数 vs 渲染」，再谈 cpt 优化（别把取数等待当渲染）
 
