@@ -26,6 +26,7 @@ cpt 是帆软自有序列化格式，通用 XML 往返会**丢注释、改自闭
     </WorkBook>
 """
 
+import html
 import re
 
 from .exceptions import ApiError
@@ -243,6 +244,14 @@ def _escape_xml(value: str) -> str:
     return (value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def _unescape_xml(value: str) -> str:
+    """属性/文本里的 XML 实体还原成逻辑名（含数字字符引用；单层还原，不二次解码）。
+
+    用 `html.unescape` 与 `cptmodel` 的校验口径对齐（`&amp;lt;` → `&lt;`，`&#38;` → `&`）。
+    """
+    return html.unescape(value)
+
+
 # ---------------------------------------------------------------------------
 # cpt 语义层
 # ---------------------------------------------------------------------------
@@ -252,7 +261,7 @@ def table_datas(text: str):
     for td in find(text, "TableData", path=("WorkBook", "TableDataMap")):
         conn = _first_text(text, td, "Connection/DatabaseName")
         out.append({
-            "name": td.attrs.get("name", ""),
+            "name": _unescape_xml(td.attrs.get("name", "")),
             "class": td.attrs.get("class", ""),
             "connection": conn,
             # SQL 保留原始空白：这样 --replace 之后除被替换的子串外**逐字节相同**
@@ -668,8 +677,8 @@ def _classify_o(text: str, o: Element) -> dict:
     t = o.attrs.get("t", "")
     if t == "DSColumn":
         attrs = _first_direct(text, o, "Attributes")
-        ds = attrs.attrs.get("dsName", "") if attrs else ""
-        col = attrs.attrs.get("columnName", "") if attrs else ""
+        ds = _unescape_xml(attrs.attrs.get("dsName", "")) if attrs else ""
+        col = _unescape_xml(attrs.attrs.get("columnName", "")) if attrs else ""
         rg = parse_rg(text, o)
         return {"kind": "ds", "dataset": ds, "column": col,
                 "binding": f"{ds}.{col}" if ds or col else None,

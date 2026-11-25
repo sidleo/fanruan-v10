@@ -310,6 +310,19 @@ def test_dataset_xml_rejects_empty_names():
         cptxml.dataset_xml("ds", "", "select 1")
 
 
+def test_dataset_name_with_xml_entities_is_logical():
+    """回归（2026-11-24 真实会话）：数据集名带 `&` 时，读出来是 `销售&amp;目标`，
+    `report dataset --set-sql 销售&目标` 与 `report cell --bind 销售&目标.col` 都找不到数据集。"""
+    text = cptxml.add_dataset(CPT, cptxml.dataset_xml("销售&目标", "conn", "select 1"),
+                              "销售&目标")
+    assert cptxml.dataset_names(text) == ["ds1", "销售&目标"]
+    names = [t["name"] for t in cptxml.table_datas(text)]
+    assert "销售&目标" in names
+    assert "销售&amp;目标" in text          # 落盘仍是转义后的 XML
+    text = cptxml.remove_dataset(text, "销售&目标")
+    assert cptxml.dataset_names(text) == ["ds1"]
+
+
 def test_add_dataset_into_empty_map_is_selfclosed_then_open():
     text = cptxml.empty_skeleton()
     text = cptxml.add_dataset(text, cptxml.dataset_xml("ds1", "c", "select 1"), "ds1")

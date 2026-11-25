@@ -37,6 +37,24 @@ def cells_of(text, name="main", block=None):
     return {c.at: c for c in grid.cells}
 
 
+def test_cell_binding_read_returns_logical_dataset_name():
+    """读取路径也要还原实体：`cell --list` / `find_cell` 不能显示 `销售&amp;目标`。"""
+    text = book(cell("A1", binding="销售&目标.v"))
+    found = cptxml.find_cell(text, "A1")
+    assert found["binding"] == "销售&目标.v"
+
+
+def test_bind_dataset_name_with_ampersand():
+    """回归（2026-11-24）：`--bind 销售&目标.col` 要能匹配 XML 里的 `name="销售&amp;目标"`。"""
+    body = ('<WorkBook><TableDataMap><TableData name="销售&amp;目标" '
+            'class="com.fr.data.impl.DBTableData"><Query><![CDATA[select 1 as v]]></Query>'
+            '</TableData></TableDataMap>' + sheet("") +
+            '<StyleList><Style/><Style/></StyleList></WorkBook>')
+    out, changes = reportops.plan_cell(body, "A1", sheet="main", binding="销售&目标.v")
+    assert 'dsName="销售&amp;目标"' in out
+    assert 'dsName="销售&amp;amp;目标"' not in out   # 不能二次转义
+
+
 def formula_at(text, at, name="main", block=None):
     index = cptmodel.DocumentIndex(text)
     grid = index.select(name, block)
