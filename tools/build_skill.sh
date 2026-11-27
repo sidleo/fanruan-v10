@@ -77,7 +77,9 @@ check() {
     echo "—— ③ git 历史（仓库一旦公开，每条提交都可见）——"
     # 同一类坑：循环体里 `grep -c` 0 命中时退出码 1，会让 while 子壳带非 0 退出，
     # 再被 pipefail + set -e 放大成整段静默中断 ⇒ 每轮末尾兜底 `|| true`（计数仍照常打印）。
-    n=$(git rev-list --all --objects 2>/dev/null | awk '{print $1}' | sort -u | while read -r h; do
+    # 只扫可发布引用（分支/标签/远端）：DSH 的本地快照引用 refs/codex/* 永不推送，
+    # 却会把「改到一半的工作树」抓进去 —— 包含它们会让门禁在敏感内容修好之后永久红。
+    n=$(git rev-list --all --exclude='refs/codex/*' --objects 2>/dev/null | awk '{print $1}' | sort -u | while read -r h; do
           [ "$(git cat-file -t "$h" 2>/dev/null)" = blob ] && git cat-file blob "$h" 2>/dev/null | grep -cE "$bl" || true
         done | awk '{s+=$1} END {print s+0}')
     echo "   命中 $n"; [ "$n" != "0" ] && bad=1
